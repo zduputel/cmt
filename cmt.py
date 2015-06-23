@@ -29,6 +29,7 @@ class cmt(object):
         self.MTnm = ['rr','tt','pp','rt','rp','tp']
         self.MT  = None
         self.ts  = ts
+        self.hd  = hd
         self.lon = lon
         self.lat = lat
         self.dep = dep
@@ -74,3 +75,52 @@ class cmt(object):
         fid.close()
         # All done
 
+    def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):
+        '''
+        Compute mechanism
+        Args:
+           * npx: number of points
+           * colors: RGB colors for compressional and tensional quadrants
+        '''
+        
+        # Mecanism
+        meca = np.zeros((npx,npx))
+    
+        # x,y coordinates
+        X,Y = np.meshgrid(np.linspace(-1,1,npx),np.linspace(-1,1,npx))
+    
+        # distance, angles
+        r  = np.sqrt(X*X+Y*Y)
+        ta = 2. * np.arcsin(r/np.sqrt(2))
+        az = np.arctan2(X,Y)
+        
+        # gamma vector
+        ga = np.zeros((3,npx,npx))
+        ga[0] = -np.cos(ta)
+        ga[1] = -np.sin(ta)*np.cos(az)
+        ga[2] =  np.sin(ta)*np.sin(az)
+
+        # P-wave amplitude
+        MT = self.MT
+        amp = MT[0]*ga[0]*ga[0] + MT[1]*ga[1]*ga[1] + MT[2]*ga[2]*ga[2]
+        amp += 2*(MT[3]*ga[0]*ga[1] + MT[4]*ga[0]*ga[2] + MT[5]*ga[1]*ga[2])
+
+        # Polarity
+        i0,j0 = np.where(amp> 0.)
+        i1,j1 = np.where(amp<=0.)
+        i2,j2 = np.where(r>=0.98)
+        i3,j3 = np.where(r>1.)
+        pol = np.zeros((npx,npx,3))
+        pol[i0,j0] = colors[0]
+        pol[i1,j1] = colors[1]
+        pol[i2,j2] = [0.,0.,0.]
+        pol[i3,j3] = [1.,1.,1.]
+        pol=np.ma.masked_where(pol>=2.,pol)[::-1,:]
+        
+        if ax is None:
+            import matplotlib.pyplot as plt
+            fig = plt.figure()
+            ax  = fig.add_subplot(111)
+        ax.imshow(pol)
+        ax.set_axis_off()
+        #return x,y,r,amp,pol
