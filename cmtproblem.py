@@ -10,7 +10,7 @@ from scipy import signal
 from scipy import linalg
 from copy  import deepcopy
 import numpy as np
-import os
+import os,sys
 
 # Personals
 from sacpy import sac
@@ -258,8 +258,9 @@ class cmtproblem(object):
                 ib = int((tbeg+data_sac.o-data_sac.b)/data_sac.delta)
                 ie = ib+int((tend-tbeg)/data_sac.delta)
                 t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
-                assert ib>=0, 'Incomplete data for %s (ie<0)'%(ifile)                
-                assert ie<=data_sac.npts,'Incomplete data for %s (ie>npts)'%(ifile)
+                if ib<0 or ie>data_sac.npts:
+                        sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
+                        continue
                 if self.taper:
                     ib -= self.taper_n
                     ie += self.taper_n
