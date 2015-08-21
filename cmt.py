@@ -34,6 +34,7 @@ class cmt(object):
         self.lat = lat
         self.dep = dep
         # All done
+
         
     def rcmtfile(self,cmtfil):
         '''
@@ -55,6 +56,7 @@ class cmt(object):
                 self.MT[i]=float(L[i+7].strip().split(':')[1])
         # All done
 
+        
     def wcmtfile(self,cmtfil):
         '''
         Writes CMTSOLUTION file
@@ -74,6 +76,117 @@ class cmt(object):
                 fid.write('M%s: %18.6e\n'%(self.MTnm[i],self.MT[i]))
         fid.close()
         # All done
+
+        
+    def M0(self):
+        '''
+        Calculate M0 (using Dahlen and Tromp convention)
+        '''
+        assert self.MT is not None, 'MT must be assigned'
+        MT = self.MT
+        M0 =  MT[0]*MT[0] + MT[1]*MT[1] + MT[2]*MT[2]
+        M0 += 2*(MT[3]*MT[3] + MT[4]*MT[4] + MT[5]*MT[5])
+        M0 = np.sqrt(M0/2.)
+        # All done
+        return M0
+
+    
+    def Mw(self):
+        '''
+        Calculate Mw
+        '''
+        M0 = self.M0()
+        Mw = 2./3.*(np.log10(M0)-16.1)
+        # All done        
+        return Mw
+
+    
+    def fullMT(self):
+        '''
+        Returns the full moment tensor
+        '''
+
+        # Check that MT is assigned
+        assert self.MT is not None, 'MT must be assigned'
+
+        # Create and fill the 3x3 array
+        TM = np.zeros((3,3))
+        TM[0,0] = self.MT[0]
+        TM[1,1] = self.MT[1]
+        TM[2,2] = self.MT[2]
+        TM[0,1] = self.MT[3]
+        TM[0,2] = self.MT[4]
+        TM[1,2] = self.MT[5]
+        TM[1,0] = TM[0,1]
+        TM[2,0] = TM[0,2]
+        TM[2,1] = TM[1,2]
+
+        # All done
+        return TM
+
+    
+    def v2str(self,vn,vs,tol=0.001):
+        '''
+        Returns strike dip rake of the plane with normal vn and slip vector vs
+        '''
+
+        # Check that normal is upward
+        if vn[0]<0.:
+            vn *= -1.
+            vs *= -1.
+
+        # Compute strike, dip, rake
+        if vn[0] > 1. - tol:       # Horizontal plane
+            strike = 0.
+            dip    = 0.
+            rake   = np.arctan2(-vs[2],-vs[1])
+        elif vn[0] < tol:          # Vectical plane
+            strike = np.arctan2(vn[1],vn[2])
+            dip    = np.pi/2.
+            rake   = np.arctan2(vs[0], -vs[1]*vn[2] + vs[2]*vn[1])
+        else:                      # Oblique plane
+            strike = np.arctan2(vn[1], vn[2])
+            dip    = np.arccos(vn[0])
+            rake   = np.arctan2((-vs[1]*vn[1] - vs[2]*vn[2]),
+                                (-vs[1]*vn[2] + vs[2]*vn[1])*vn[0])
+
+        # Rad 2 Deg
+        rad2deg = 180./np.pi
+        strike *= rad2deg
+        if (strike<0.):
+            strike += 360.
+        dip  *= rad2deg
+        rake *= rad2deg
+
+        # All done
+        return strike,dip,rake
+
+    
+    def nodalplanes(self):
+        '''
+        Returns strike, dip, rake of each plane
+        '''
+
+        # Get the full moment tensor
+        MT = self.fullMT()
+
+        # Compute eigenvalues/eigenvectors and sort them
+        [di,vi] = np.linalg.eig(MT)
+        i  = np.argsort(di)[::-1]
+        di = di[i]
+        vi = vi[:,i]
+
+        # Normal/Slip vectors
+        v1 = (vi[:,0] + vi[:,2])/np.sqrt(2.)
+        v2 = (vi[:,0] - vi[:,2])/np.sqrt(2.)
+
+        # Nodal planes
+        strike1,dip1,rake1 = self.v2str(v1,v2)
+        strike2,dip2,rake2 = self.v2str(v2,v1)
+
+        # All done
+        return [[strike1,dip1,rake1],[strike2,dip2,rake2]]
+
 
     def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):
         '''

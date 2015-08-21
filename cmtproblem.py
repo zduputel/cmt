@@ -109,7 +109,8 @@ class cmtproblem(object):
         Cm = linalg.inv(GtG)
         
         # Moment tensor
-        m = Cm.dot(G.T).dot(self.D)
+        Dp = G.T.dot(self.D)
+        m  = Cm.dot(Dp)
 
         # Scale moment tensor
         m *= scale
@@ -126,7 +127,8 @@ class cmtproblem(object):
         else:
             self.cmt.MT = m.copy()
 
-        S   = self.G.dot(self.cmt.MT/scale)
+        S  = G.dot(m)
+        S /= scale
         res = self.D - S
         res = np.sqrt(res.dot(res)/res.size)
         nD  = np.sqrt(self.D.dot(self.D)/self.D.size)
@@ -134,7 +136,6 @@ class cmtproblem(object):
         self.global_rms = [res,nD,nS]
         
         # All done
-                                
         
     def buildD(self):
         '''
@@ -257,8 +258,8 @@ class cmtproblem(object):
                 ib = int((tbeg+data_sac.o-data_sac.b)/data_sac.delta)
                 ie = ib+int((tend-tbeg)/data_sac.delta)
                 t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
-                assert ib>=0, 'Incomplete data (ie<0)'
-                assert ie<=data_sac.npts,'Incomplete data (ie>npts)'
+                assert ib>=0, 'Incomplete data for %s (ie<0)'%(ifile)                
+                assert ie<=data_sac.npts,'Incomplete data for %s (ie>npts)'%(ifile)
                 if self.taper:
                     ib -= self.taper_n
                     ie += self.taper_n
@@ -435,11 +436,11 @@ class cmtproblem(object):
                      assert chan_id in stf, 'No channel id %s in stf'%(chan_id)
                      fstf = np.fft.fft(stf[chan_id],n=npts_fft)
                 self.synt[chan_id].depvar = np.real(np.fft.ifft(fsynt*fstf))[:self.synt[chan_id].npts]
-                import matplotlib.pyplot as plt                                     
-                plt.plot(self.data[chan_id].depvar,'k-')
-                plt.plot(self.synt[chan_id].depvar,'b-')
-                plt.title('%s %.2f'%(chan_id,self.synt[chan_id].az))
-                plt.show()
+                #import matplotlib.pyplot as plt                                     
+                #plt.plot(self.data[chan_id].depvar,'k-')
+                #plt.plot(self.synt[chan_id].depvar,'b-')
+                #plt.title('%s %.2f'%(chan_id,self.synt[chan_id].az))
+                #plt.show()
             # RMS calculation
             if self.data is not None:
                 res = self.synt[chan_id].depvar - self.data[chan_id].depvar
@@ -712,3 +713,11 @@ class cmtproblem(object):
             fid.write('%s\n'%(chan_id))
         fid.write
         # All done
+
+
+    def copy(self):
+        '''
+        Returns a copy of the sac object
+        '''
+        # All done
+        return deepcopy(self)               
