@@ -4,7 +4,6 @@ Simple class for CMT inversion problems
 Written by Z. Duputel and L. Rivera, May 2015
 '''
 
-
 # Externals
 from scipy import signal
 from scipy import linalg
@@ -164,13 +163,15 @@ class cmtproblem(object):
         # All done
             
         
-    def preparedata(self,i_sac_lst,filter_coef=None,wpwin=False,swwin=None,taper_width=None,
-                    o_dir=None,o_sac_lst=None):
+    def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',
+                    wpwin=False,swwin=None,taper_width=None,o_dir=None,o_sac_lst=None):
         '''
         Prepare Data
         Args:
             * i_sac_lst: list of input data sac file
-            * filter_coef: filter coefficients (optional)
+            * filter_freq (optional): filter corner frequencies (see sacpy.filter)
+            * filter_order (optional): default is 4 (see sacpy.filter)
+            * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
             * wpwin: if True, use W-phase window
             * win_param: surface wave windowing (optional):
                - if wpwin=False: Surface wave type windowing
@@ -221,14 +222,12 @@ class cmtproblem(object):
         for ifile in ifiles:
 
             # Read sac file            
-            data_sac.rsac(ifile)
+            data_sac.read(ifile)
             assert np.round(data_sac.delta,3)==delta, 'data should be sampled at 1sps'
 
             # Filter
-            if filter_coef is not None:
-                assert len(filter_coef)==2, 'Incorrect filter_coef, must include [b,a]'
-                b,a = filter_coef
-                data_sac.depvar = signal.lfilter(b,a,data_sac.depvar)
+            if filter_freq is not None:
+                data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)
 
             # Output directory for unwindowed filtered sac data
             if o_dir is not None:
@@ -252,7 +251,11 @@ class cmtproblem(object):
                 tbeg = data_sac.dist/swwin[0]
                 tend = data_sac.dist/swwin[1]
                 if len(swwin)>2 and (tend-tbeg) < swwin[2]:
-                    tend = tbeg + swwin[2]            
+                    tend = tbeg + swwin[2]
+                if len(swwin)>3:
+                    tbeg -= swwin[3]
+                    if (tend-tbeg) < swwin[2]:
+                        tend = tbeg + swwin[2]
                     
             if wpwin or swwin is not None:
                 ib = int((tbeg+data_sac.o-data_sac.b)/data_sac.delta)
@@ -283,7 +286,8 @@ class cmtproblem(object):
         # All done            
                 
         
-    def preparekernels(self,GF_names,stf=None,delay=0.,filter_coef=None,baseline=0,left_taper=False,wpwin=False,scale=1.):
+    def preparekernels(self,GF_names,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
+                       baseline=0,left_taper=False,wpwin=False,scale=1.):
         '''
         Prepare Green's functions
         Args:
@@ -294,7 +298,9 @@ class cmtproblem(object):
             * delay: time-shift (in sec, optional)
                 - can be a single value used for all stations
                 - can be a dictionary with one delay per channel id
-            * filter_coef: filter coefficient (for scipy.signal.lfilter, optional)
+            * filter_freq (optional): filter corner frequencies (see sacpy.filter)
+            * filter_order (optional): default is 4 (see sacpy.filter)
+            * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
             * baseline : number of samples to remove baseline (default: no baseline)
             * left_taper: if True, apply left taper over baseline (optional)
             * scale: scaling factor for all GFs (optional)
@@ -322,7 +328,7 @@ class cmtproblem(object):
             for m in self.cmt.MTnm:
 
                 # Read GF sac file
-                gf_sac.rsac(GF_names[chan_id][m])
+                gf_sac.read(GF_names[chan_id][m])
                 assert np.round(gf_sac.delta,3)==1.0, 'GFs should be sampled at 1sps'
 
                 # Remove baseline
@@ -358,11 +364,9 @@ class cmtproblem(object):
                 else:
                     gf_sac.b += delay
                         
-                # Filter 
-                if filter_coef is not None:
-                    assert len(filter_coef)==2, 'Incorrect filter_coef, must include [b,a]'
-                    b,a = filter_coef
-                    gf_sac.depvar = signal.lfilter(b,a,gf_sac.depvar)
+                # Filter
+                if filter_freq is not None:
+                    gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
 
                 # Time-window matching data
                 if self.data is not None:
@@ -455,7 +459,7 @@ class cmtproblem(object):
 
         # All done
 
-    def deconv_projlandweber(self,duration=None,nit=1000,nit_min=100,fwahm=5.):
+    def deconv_projlandweber(self,duration=None,nit=1000,nit_min=100,gauss_std=6.,gauss_n=50,fwahm=None):
         '''
         
         '''
@@ -464,7 +468,8 @@ class cmtproblem(object):
         assert self.synt is not None, 'synt not available'
 
         # Smoothing gaussian
-        sigma_avg   = fwahm/(2.0*np.sqrt(2.0*np.log(2)))
+        if fwahm is not None:
+            sigma_avg   = fwahm/(2.0*np.sqrt(2.0*np.log(2)))
 
         # Main loop
         self.stf = {}
@@ -483,13 +488,20 @@ class cmtproblem(object):
 
             # Pre-convolution with a Gaussian (cf., Vallee et al., 2010)
             #G  = signal.gaussian(32,std=4.4)
-            G  = signal.gaussian(32,std=6.0)
+            G  = signal.gaussian(gauss_n,std=gauss_std)
             iG = G.sum()*data.delta
             G /= iG
             fG = np.fft.fft(G,n=npts_fft)
             fdata       = np.fft.fft(data.depvar,n=npts_fft)
             fdata       = fdata*fG
             data.depvar = np.real(np.fft.ifft(fdata))[:self.synt[chan_id].npts]
+
+            #import matplotlib.pyplot as plt
+            #plt.subplot(211)
+            #plt.plot(G)
+            #plt.subplot(212)
+            #plt.semilogy(np.fft.fftfreq(npts_fft),np.abs(fG))
+            #plt.show()
             
             
             # FFT synthetics
@@ -538,26 +550,34 @@ class cmtproblem(object):
                         print(eps_p)
                         stf = stf_p.copy()
                         break                    
-                    if it>=nit_min and (np.absolute(eps_p-eps)/eps_p<0.0001 or delta<0.0001):
+                    if it>=nit_min and (np.absolute(eps_p-eps)/eps_p<0.00001 or delta<0.00001):
                         break
                 
                 # Update stf_p and eps_p
                 stf_p = stf.copy()
                 eps_p = eps
 
-            ## Convolve with gaussian
-            #gaussw  = signal.gaussian(npts,std=sigma_avg)
-            #igaussw = gaussw.sum()*data.delta
-            #gaussw /= igaussw
-            #stf = np.convolve(stf,gaussw,mode='same')
+            # Convolve with gaussian
+            if fwahm is not None:
+                gaussw  = signal.gaussian(npts,std=sigma_avg)
+                igaussw = gaussw.sum()*data.delta
+                gaussw /= igaussw
+                stf = np.convolve(stf,gaussw,mode='same')
             
             # Fill out dictionary
             self.stf[chan_id]=stf.copy()
-
-            
+            #import matplotlib.pyplot as plt
+            #fstf = np.fft.fft(stf,n=npts_fft) 
+            #pred = np.real(np.fft.ifft(fsynt*fstf))[:npts]
+            ##pred = np.real(np.fft.ifft(fsynt))[:npts]
+            #plt.plot(data.depvar)
+            #plt.plot(pred)
+            #plt.title(chan_id)
+            #plt.show()
         # All done
 
-    def traces(self,length=3000,i_sac_lst=None,show_win=False):
+    def traces(self,length=3000,i_sac_lst=None,show_win=False,swwin=None,wpwin=None,t0delay=150.,
+               rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1):
         '''
         Plot data / synt traces
         '''
@@ -583,16 +603,19 @@ class cmtproblem(object):
         # Create figure
         fig = plt.figure()
         fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
-        pp = matplotlib.backends.backend_pdf.PdfPages('traces.pdf')        
+        pp = matplotlib.backends.backend_pdf.PdfPages(ofile)
         nc = 3
         nl = 5
         perpage = nc * nl
 
-        coords = []
-        for chan_id in self.chan_ids:
-            sacdata = self.data[chan_id].copy()
-            coords.append([sacdata.stla,sacdata.stlo,sacdata.az,sacdata.dist])
-        coords = np.array(coords) 
+        if staloc is None:
+            coords = []
+            for chan_id in self.chan_ids:
+                sacdata = self.data[chan_id].copy()
+                coords.append([sacdata.stla,sacdata.stlo,sacdata.az,sacdata.dist])
+            coords = np.array(coords)
+        else:
+             coords = staloc.copy()       
         
         # Loop over channel ids
         ntot   = len(self.chan_ids)
@@ -602,7 +625,7 @@ class cmtproblem(object):
         pages = 1
         for chan_id in self.chan_ids:
             if i_sac_lst is not None:                
-                sacdata.rsac(i_sac[chan_id])
+                sacdata.read(i_sac[chan_id])
             else:
                 sacdata = self.data[chan_id].copy()
             sacsynt = self.synt[chan_id].copy()
@@ -610,7 +633,7 @@ class cmtproblem(object):
                 plt.suptitle('CMT3D,   p %d/%d'%(pages,npages), fontsize=16, y=0.95)
                 ofic = 'page_W_%02d.pdf'%(pages)
                 print(ofic)
-                fig.set_rasterized(True)
+                fig.set_rasterized(rasterize)
                 pp.savefig(orientation='landscape')
                 plt.close()
                 pages += 1
@@ -622,25 +645,41 @@ class cmtproblem(object):
             t2 = np.arange(sacsynt.npts,dtype='double')*sacsynt.delta + sacsynt.b - sacsynt.o
             # Plot trace
             ax = plt.subplot(nl,nc,count)
-            plt.plot(t1,sacdata.depvar*1000.,'k')
+            plt.plot(t1,sacdata.depvar*1000.,'k-')
             plt.plot(t2,sacsynt.depvar*1000.,'r-')
             # Axes limits
             #plt.xlim([t1[0],t1[-1]+(t1[-1]-t1[0])*0.4])
-            t0 = t1[0] - 150.0
+            t0 = t1[0] - t0delay
             if t0<0.:
                 t0 = 0.
             plt.xlim([t0,t0+length*sacdata.delta])
-            a    = np.absolute(sacsynt.depvar).max()*1000.
-            ymin = -1.1*a
-            ymax =  1.1*a
+            a    = np.absolute(sacdata.depvar).max()*1000.
+            ymin = -yfactor*a
+            ymax =  yfactor*a
             ylims = [ymin,ymax]
             plt.ylim(ylims)
             if show_win:
-                tbeg = self.data[chan_id].b - self.data[chan_id].o
-                tend = self.data[chan_id].e - self.data[chan_id].o
+                data_sac = self.data[chan_id]
+                if wpwin:
+                    assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
+                    tbeg = data_sac.t[0] - data_sac.o
+                    if swwin is not None:
+                        tend = tbeg + swwin * data_sac.gcarc
+                    else:
+                        tend = tbeg + 15.0  * data_sac.gcarc
+                
+                elif swwin is not None:
+                    assert len(swwin)>=2,    'swwin must be [V_window, Window_width]'
+                    assert swwin[0]>swwin[1], 'vbeg must be larger than vend'
+                    assert data_sac.dist >= 0., 'dist must be assigned in sac data header'
+                    tbeg = data_sac.dist/swwin[0]
+                    tend = data_sac.dist/swwin[1]
+                    if len(swwin)>2 and (tend-tbeg) < swwin[2]:
+                        tend = tbeg + swwin[2]
+                else:
+                    tbeg = self.data[chan_id].b - self.data[chan_id].o
+                    tend = self.data[chan_id].e - self.data[chan_id].o
                 plt.plot([tbeg,tend],[0,0],'ro')
-                t3 = np.arange(self.data[chan_id].npts,dtype='double')*self.data[chan_id].delta + self.data[chan_id].b - self.data[chan_id].o
-                #plt.plot(t3,self.data[chan_id].depvar*1000.,'b-')
 
             # Annotations
             if sacdata.kcmpnm[2] == 'Z':
@@ -652,13 +691,14 @@ class cmtproblem(object):
                 label += '%6.1f^{\circ}, %6.1f^{\circ}$'
                 label  = label%(sacdata.knetwk,sacdata.kstnm, sacdata.kcmpnm, sacdata.khole,
                                 sacdata.az, sacdata.gcarc, sacdata.cmpaz)
-            label = label+' %.1f'%(self.rms[chan_id][0]/self.rms[chan_id][2])
+            label = label#+' %.1f'%(self.rms[chan_id][0]/self.rms[chan_id][2])
             plt.title(label,fontsize=10.0,va='center',ha='center')
             if not (count-1)%nc:
                 plt.ylabel('mm',fontsize=10)
             if (count-1)/nc == nl-1 or nchan+nc > ntot:
                 plt.xlabel('time, sec',fontsize=10) 
             plt.grid()
+            
             # Map
             m = Basemap(projection='ortho',lat_0=sacdata.evla,lon_0=sacdata.evlo,resolution='c')
             pos  = ax.get_position().get_points()
@@ -681,7 +721,7 @@ class cmtproblem(object):
             nchan += 1
         ofic = 'page_W_%02d.pdf'%(pages)
         print(ofic)
-        fig.set_rasterized(True)
+        fig.set_rasterized(rasterize)
         plt.suptitle('CMT3D,    p %d/%d'%(pages,npages), fontsize=16, y=0.95)
         pp.savefig(orientation='landscape')
         plt.close()

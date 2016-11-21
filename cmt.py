@@ -7,11 +7,48 @@ Written by Z. Duputel and L. Rivera, May 2015
 # Externals
 import numpy as np
 
+def gamma(az,ta):
+    '''
+    Return direction cosines
+    Args: 
+        az: azimuth
+        ta: take-off angle
+    '''
+    if len(az.shape)==2:        
+        ga = np.zeros((3,az.shape[0],az.shape[1]))
+    else:
+        ga = np.zeros((3,az.shape[0]))
+    ga[0] = -np.cos(ta)
+    ga[1] = -np.sin(ta)*np.cos(az)
+    ga[2] =  np.sin(ta)*np.sin(az)
+
+    # All done
+    return ga
+        
+def Rp(az,ta,MT):
+    '''
+    Compute P-wave radiation
+    Args:
+        az: azimuth
+        ta: take-off angle
+        MT: Moment tensor
+    '''
+    # Direction cosines
+    ga = gamma(az,ta)
+
+    # P-wave amplitude
+    amp = MT[0]*ga[0]*ga[0] + MT[1]*ga[1]*ga[1] + MT[2]*ga[2]*ga[2]
+    amp += 2*(MT[3]*ga[0]*ga[1] + MT[4]*ga[0]*ga[2] + MT[5]*ga[1]*ga[2])    
+
+    # All done
+    return amp
+
+
 class cmt(object):
     '''
     A simple cmt class
     '''
-    def __init__(self,pdeline=None,evid=None,ts=None,hd=None,lon=None,lat=None,dep=None,MT=None):
+    def __init__(self,pdeline=None,evid=None,ts=None,hd=None,lon=None,lat=None,dep=None,MT=None,filename=None):
         '''
         Constructor
         Args:
@@ -23,18 +60,25 @@ class cmt(object):
             * lat: centroid latitude
             * dep: centroid depth
             * MT: moment tensor
+            * filename: if provided, will read parameters from a cmtsolution file
         '''
+        # Assign cmt parameters
         self.pdeline = pdeline
         self.evid = evid
         self.MTnm = ['rr','tt','pp','rt','rp','tp']
-        self.MT  = None
+        self.MT  = MT
         self.ts  = ts
         self.hd  = hd
         self.lon = lon
         self.lat = lat
         self.dep = dep
+        
+        # Read CMTSOLUTION file (if filename is provided)
+        if filename is not None:
+            self.rcmtfile(filename)
+            
         # All done
-
+        return
         
     def rcmtfile(self,cmtfil):
         '''
@@ -125,7 +169,7 @@ class cmt(object):
         return TM
 
     
-    def v2str(self,vn,vs,tol=0.001):
+    def v2sdr(self,vn,vs,tol=0.001):
         '''
         Returns strike dip rake of the plane with normal vn and slip vector vs
         '''
@@ -181,11 +225,48 @@ class cmt(object):
         v2 = (vi[:,0] - vi[:,2])/np.sqrt(2.)
 
         # Nodal planes
-        strike1,dip1,rake1 = self.v2str(v1,v2)
-        strike2,dip2,rake2 = self.v2str(v2,v1)
+        strike1,dip1,rake1 = self.v2sdr(v1,v2)
+        strike2,dip2,rake2 = self.v2sdr(v2,v1)
 
         # All done
         return [[strike1,dip1,rake1],[strike2,dip2,rake2]]
+
+    def sdr2MT(self,strike,dip,rake,M0=1e28):
+        '''
+        Fill self.MT from strike, dip, rake and M0 (optional,default M0=1e28 dyne-cm)
+        Args:
+            * strike, dip, rake angles in deg
+            * M0 in dyne-cm (optional)
+        '''
+        # deg to rad conversion
+        Phi    = strike * np.pi/180.
+        Delta  = dip    * np.pi/180.
+        Lambda = rake   * np.pi/180.
+        
+        # Sin/Cos 
+        sinP = np.sin(Phi)
+        cosP = np.cos(Phi)
+        sin2P = np.sin(2.*Phi)
+        cos2P = np.cos(2.*Phi)
+        sinD = np.sin(Delta)
+        cosD = np.cos(Delta)
+        sin2D = np.sin(2.*Delta)
+        cos2D = np.cos(2.*Delta)
+        sinL = np.sin(Lambda)
+        cosL = np.cos(Lambda)
+    
+        # MT
+        if self.MT is None:
+            self.MT = np.zeros((6,))
+        self.MT[0] = +M0 * sin2D * sinL
+        self.MT[1] = -M0 * (sinD * cosL * sin2P + sin2D * sinL * sinP*sinP)
+        self.MT[2] = +M0 * (sinD * cosL * sin2P - sin2D * sinL * cosP*cosP)
+        self.MT[3] = -M0 * (cosD * cosL * cosP  + cos2D * sinL * sinP)
+        self.MT[4] = +M0 * (cosD * cosL * sinP  - cos2D * sinL * cosP)
+        self.MT[5] = -M0 * (sinD * cosL * cos2P + 0.5 * sin2D * sinL * sin2P)
+
+        # All done
+        return 
 
 
     def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):
@@ -205,19 +286,11 @@ class cmt(object):
         # distance, angles
         r  = np.sqrt(X*X+Y*Y)
         ta = 2. * np.arcsin(r/np.sqrt(2))
-        az = np.arctan2(X,Y)
-        
-        # gamma vector
-        ga = np.zeros((3,npx,npx))
-        ga[0] = -np.cos(ta)
-        ga[1] = -np.sin(ta)*np.cos(az)
-        ga[2] =  np.sin(ta)*np.sin(az)
+        az = np.arctan2(X,Y)        
 
         # P-wave amplitude
-        MT = self.MT
-        amp = MT[0]*ga[0]*ga[0] + MT[1]*ga[1]*ga[1] + MT[2]*ga[2]*ga[2]
-        amp += 2*(MT[3]*ga[0]*ga[1] + MT[4]*ga[0]*ga[2] + MT[5]*ga[1]*ga[2])
-
+        amp = Rp(az,ta,self.MT)
+        
         # Polarity
         i0,j0 = np.where(amp> 0.)
         i1,j1 = np.where(amp<=0.)

@@ -52,7 +52,6 @@ def filtcoeffromimaster(i_master='./i_master',delta=1.):
     bp = np.array([float(iconfig['filt_cf1']),float(iconfig['filt_cf2'])])
     order = int(iconfig['filt_order'])
     bfilter,afilter = signal.butter(order,bp*2*delta,'bandpass')
-    
     # All done
     return [bfilter,afilter]
 
