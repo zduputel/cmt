@@ -384,6 +384,9 @@ class cmtproblem(object):
                     ib = int((t0-gf_sac.b)/gf_sac.delta)
                     ie = ib+data_sac.npts                    
 
+                    if ib<0:
+                        gf_sac.depvar = np.append(np.zeros((-ib,)),gf_sac.depvar)
+                        ib = 0
                     assert ib>=0, 'Incomplete GF (ie<0)'
                     assert ie<=gf_sac.npts,'Incomplete GF (ie>npts)'                    
 
