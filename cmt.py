@@ -80,7 +80,7 @@ class cmt(object):
         # All done
         return
         
-    def rcmtfile(self,cmtfil):
+    def rcmtfile(self,cmtfil,scale=1.):
         '''
         Reads CMTSOLUTION file
         Args:
@@ -97,11 +97,11 @@ class cmt(object):
         if len(L)>=13:
             self.MT = np.zeros((6,))
             for i in range(6):
-                self.MT[i]=float(L[i+7].strip().split(':')[1])
+                self.MT[i]=float(L[i+7].strip().split(':')[1])*scale
         # All done
 
         
-    def wcmtfile(self,cmtfil):
+    def wcmtfile(self,cmtfil,scale=1.):
         '''
         Writes CMTSOLUTION file
         Args:
@@ -117,7 +117,7 @@ class cmt(object):
         fid.write('depth:%17.4f\n'        % self.dep)
         if not np.equal(self.MT,None).any():
             for i in range(6):
-                fid.write('M%s: %18.6e\n'%(self.MTnm[i],self.MT[i]))
+                fid.write('M%s: %18.6e\n'%(self.MTnm[i],self.MT[i]*scale))
         fid.close()
         # All done
 
@@ -266,7 +266,7 @@ class cmt(object):
         self.MT[5] = -M0 * (sinD * cosL * cos2P + 0.5 * sin2D * sinL * sin2P)
 
         # All done
-        return 
+        return
 
 
     def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):

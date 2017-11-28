@@ -51,7 +51,50 @@ def Pplus(h,tvec,stfdur):
         #if tvec[i]<0.0 or tvec[i]>stfdur or h[i]<0.0:
         if tvec[i]>stfdur or h[i]<0.0:
             stf[i]=0.0
-    return stf    
+    return stf
+
+
+def conv_by_stf(sac_in,delay,half_width):
+    '''
+    Convolve by a triangular STF
+    '''
+    # Copy sac
+    sac_out = sac_in.copy()
+
+    # Build triangle
+    lh = int(np.floor(half_width/sac_in.delta + 0.5))
+    LH = lh + 1
+    h = np.zeros((LH,),dtype='float32')
+    for i in range(LH):
+        h[i] = 1. - np.float32(i)/np.float32(lh)
+    al0 = 2. * h.sum() - h[0]
+    h /= al0
+
+    # Weighted average
+    sac_out.depvar *= 0.
+    for i in range(sac_in.npts):
+        il  = i
+        ir  = i
+        cum = h[0] * sac_in.depvar[i]
+        for j in range(1,LH):
+            il -= 1
+            ir += 1
+            if il < 0.:
+                xl = 0.
+            else:
+                xl = sac_in.depvar[il]
+            if ir >= sac_in.npts:
+                xr = 0.
+            else:
+                xr = sac_in.depvar[ir]
+            cum += h[j] * (xl + xr)
+        sac_out.depvar[i] = cum
+
+    # Delay trace
+    sac_out.b += delay
+
+    # All done
+    return sac_out
         
 class cmtproblem(object):
 
@@ -68,6 +111,7 @@ class cmtproblem(object):
         self.gf   = None  # Green's functions sac object      
         self.D = None     # Data vector
         self.G = None     # Green's function matrix
+        self.twin = {}    # Time-window dictionary
         # RMS misfit
         self.global_rms = None # Global RMS misfit
         self.rms  = None       # RMS misfit per station
@@ -161,10 +205,10 @@ class cmtproblem(object):
         self.G = np.array(self.G).T
         
         # All done
-            
+                    
         
-    def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                    wpwin=False,swwin=None,taper_width=None,o_dir=None,o_sac_lst=None):
+    def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',wpwin=False,
+                    swwin=None,dcwin={},taper_width=None,o_dir=None,o_sac_lst=None):
         '''
         Prepare Data
         Args:
@@ -173,12 +217,17 @@ class cmtproblem(object):
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
             * wpwin: if True, use W-phase window
-            * win_param: surface wave windowing (optional):
+            * swwin: surface wave windowing (optional):
                - if wpwin=False: Surface wave type windowing
                      Time window from dist/swwin[0] to dist/swwin[1]
                      if swwin[2] exists, it is a minimum window length
                - if wpwin=True: W-phase time windowing
                      Time window from P arrival time (Ptt) + swwin*gcarc
+            * dcwin: dictionnary of time-windows for individual channels (optional):
+                       channel keys are defined following the format of sacpy.sac.id
+                       For each channel:
+               - if wpwin=False: [tbeg,tend] list with respect to origin time
+               - if wpwin=True:  [tbeg,tend] with respect to P arrival time
             * taper_width: Apply taper to data
             * o_dir: Output directory for filtered data (optional)
         '''
@@ -218,6 +267,9 @@ class cmtproblem(object):
         # Instantiate sacpy.sac
         data_sac = sac()        
 
+        # Instanciate time window dictionary
+        self.twin = {}
+        
         # Loop over sac_files
         for ifile in ifiles:
 
@@ -235,7 +287,8 @@ class cmtproblem(object):
                 o_lst.write('%s %s\n'%(ofile,data_sac.id))
                 data_sac.wsac(ofile)
                 
-            # Time-window            
+            # Time-window
+            chan_id = data_sac.id
             if wpwin:
                 assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
                 tbeg = data_sac.t[0]-data_sac.o
@@ -256,8 +309,17 @@ class cmtproblem(object):
                     tbeg -= swwin[3]
                     if (tend-tbeg) < swwin[2]:
                         tend = tbeg + swwin[2]
-                    
-            if wpwin or swwin is not None:
+
+            if chan_id in dcwin:                
+                if wpwin:
+                    tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
+                    tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                else:
+                    tbeg = dcwin[chan_id][0] 
+                    tend = dcwin[chan_id][1] 
+
+            if wpwin or dcwin or swwin is not None:
+                self.twin[chan_id] = [tbeg,tend]              
                 ib = int((tbeg+data_sac.o-data_sac.b)/data_sac.delta)
                 ie = ib+int((tend-tbeg)/data_sac.delta)
                 t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
@@ -271,10 +333,10 @@ class cmtproblem(object):
                 if self.taper:
                     data_sac.depvar[:self.taper_n]  *= self.taper_left
                     data_sac.depvar[-self.taper_n:] *= self.taper_right
-                data_sac.t[0]   = tbeg+data_sac.o
-                data_sac.b      = t[ib]+data_sac.o
-                data_sac.e      = t[ie]+data_sac.o
-                data_sac.npts   = len(data_sac.depvar)
+                data_sac.t[0] = tbeg+data_sac.o
+                data_sac.b    = t[ib]+data_sac.o
+                data_sac.e    = t[ie]+data_sac.o
+                data_sac.npts = len(data_sac.depvar)
 
             # Populate the dictionary
             self.data[data_sac.id] = data_sac.copy()
@@ -284,8 +346,56 @@ class cmtproblem(object):
             o_lst.close()
         
         # All done            
-                
+
+    def setTimeWindow(self,wpwin=False,swwin=None,dcwin={}):
+        '''
+        Set time-window parameters in self.twin
+        '''
+        self.twin = {}
+        for chan_id in self.data:
+            # Data file
+            data_sac = self.data[chan_id]
+            
+            # W-phase time-window
+            if wpwin:
+                assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
+                tbeg = data_sac.t[0]-data_sac.o
+                if swwin is not None:
+                    tend = tbeg + swwin * data_sac.gcarc
+                else:
+                    tend = tbeg + 15.0  * data_sac.gcarc
+
+            # Surface time-window    
+            elif swwin is not None:
+                assert len(swwin)>=2,    'swwin must be [V_window, Window_width]'
+                assert swwin[0]>swwin[1], 'vbeg must be larger than vend'
+                assert data_sac.dist >= 0., 'dist must be assigned in sac data header'
+                tbeg = data_sac.dist/swwin[0]
+                tend = data_sac.dist/swwin[1]
+                if len(swwin)>2 and (tend-tbeg) < swwin[2]:
+                    tend = tbeg + swwin[2]
+                if len(swwin)>3:
+                    tbeg -= swwin[3]
+                    if (tend-tbeg) < swwin[2]:
+                        tend = tbeg + swwin[2]
+            else:
+                tbeg = data_sac.b - data_sac.o
+                tend = data_sac.e - data_sac.e                            
         
+            # Time-window defined for individual channels
+            if chan_id in dcwin:                
+                if wpwin:
+                    tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
+                    tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                else:
+                    tbeg = dcwin[chan_id][0] 
+                    tend = dcwin[chan_id][1] 
+
+            self.twin[chan_id] = [tbeg,tend]
+            
+        # All done
+        return
+
     def preparekernels(self,GF_names,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
                        baseline=0,left_taper=False,wpwin=False,scale=1.):
         '''
@@ -293,6 +403,7 @@ class cmtproblem(object):
         Args:
             * GF_names : dictionary of GFs names
             * stf : moment rate function (optionnal)
+                - can be a scalar giving a triangular STF half-duration
                 - can be a single array used for all stations
                 - can be a dictionary with one stf per channel id
             * delay: time-shift (in sec, optional)
@@ -303,6 +414,7 @@ class cmtproblem(object):
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
             * baseline : number of samples to remove baseline (default: no baseline)
             * left_taper: if True, apply left taper over baseline (optional)
+            * wpwin: Deprecated
             * scale: scaling factor for all GFs (optional)
         '''
 
@@ -313,12 +425,25 @@ class cmtproblem(object):
         self.gf = {}
 
         # Assign cmt delay
-        if not isinstance(delay,dict):
+        triangular_stf = False
+        if not isinstance(delay,dict): # Not a delay dictionary
             self.cmt.ts = delay
             if stf is not None:
-                self.cmt.hd = (len(stf)-1)*0.5
+                if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
+                    triangular_stf = True
+                    self.cmt.hd    = float(stf)
+                else:
+                    self.cmt.hd = (len(stf)-1)*0.5
             else:
-                self.cmt.hd = delay
+                if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
+                    triangular_stf = True
+                    self.cmt.hd    = float(stf)
+                else:
+                    self.cmt.hd = delay
+        else:
+            if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
+                triangular_stf = True
+                self.cmt.hd    = float(stf)
             
         # Loop over channel ids
         for chan_id in GF_names.keys():
@@ -349,8 +474,12 @@ class cmtproblem(object):
                 gf_sac.depvar *= scale
 
                 # Convolve with STF(s)
-                if stf is not None: 
-                    if isinstance(stf,np.ndarray) or isinstance(stf,list): 
+                if stf is not None:
+                        
+                    if triangular_stf: # Convolve with a triangular stf
+                        gf_sac.depvar = conv_by_stf(sac_in,0.,half_width)
+                            
+                    elif isinstance(stf,np.ndarray) or isinstance(stf,list): 
                         gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='same')
                         
                     else:
@@ -375,12 +504,15 @@ class cmtproblem(object):
                     b    = data_sac.b - data_sac.o
                     npts = data_sac.npts                    
                     assert np.round(data_sac.delta,3)==1.0, 'data should be sampled at 1sps'
-
                     t    = np.arange(gf_sac.npts)*gf_sac.delta+gf_sac.b-gf_sac.o
                     if wpwin:
                         t0 = data_sac.t[0]-data_sac.o
                     else:
                         t0 = data_sac.b-data_sac.o
+
+                    if chan_id in self.twin:
+                        t0 = self.twin[chan_id][0]
+                    
                     ib = int((t0-gf_sac.b)/gf_sac.delta)
                     ie = ib+data_sac.npts                    
 
@@ -580,7 +712,7 @@ class cmtproblem(object):
         # All done
 
     def traces(self,length=3000,i_sac_lst=None,show_win=False,swwin=None,wpwin=None,t0delay=150.,
-               rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1):
+               variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1):
         '''
         Plot data / synt traces
         '''
@@ -618,7 +750,7 @@ class cmtproblem(object):
                 coords.append([sacdata.stla,sacdata.stlo,sacdata.az,sacdata.dist])
             coords = np.array(coords)
         else:
-             coords = staloc.copy()       
+            coords = staloc.copy()       
         
         # Loop over channel ids
         ntot   = len(self.chan_ids)
@@ -659,31 +791,43 @@ class cmtproblem(object):
             a    = np.absolute(sacdata.depvar).max()*1000.
             ymin = -yfactor*a
             ymax =  yfactor*a
-            ylims = [ymin,ymax]
-            plt.ylim(ylims)
             if show_win:
-                data_sac = self.data[chan_id]
+                sacdata = self.data[chan_id]
                 if wpwin:
-                    assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
-                    tbeg = data_sac.t[0] - data_sac.o
+                    assert sacdata.gcarc >= 0., 'gcarc must be assigned in sac data header'
+                    tbeg = sacdata.t[0] - sacdata.o
                     if swwin is not None:
-                        tend = tbeg + swwin * data_sac.gcarc
+                        tend = tbeg + swwin * sacdata.gcarc
                     else:
-                        tend = tbeg + 15.0  * data_sac.gcarc
+                        tend = tbeg + 15.0  * sacdata.gcarc
                 
                 elif swwin is not None:
                     assert len(swwin)>=2,    'swwin must be [V_window, Window_width]'
                     assert swwin[0]>swwin[1], 'vbeg must be larger than vend'
-                    assert data_sac.dist >= 0., 'dist must be assigned in sac data header'
-                    tbeg = data_sac.dist/swwin[0]
-                    tend = data_sac.dist/swwin[1]
+                    assert sacdata.dist >= 0., 'dist must be assigned in sac data header'
+                    tbeg = sacdata.dist/swwin[0]
+                    tend = sacdata.dist/swwin[1]
                     if len(swwin)>2 and (tend-tbeg) < swwin[2]:
                         tend = tbeg + swwin[2]
-                else:
+                elif chan_id in self.twin:
+                    tbeg,tend = self.twin[chan_id]
+                else:                    
                     tbeg = self.data[chan_id].b - self.data[chan_id].o
                     tend = self.data[chan_id].e - self.data[chan_id].o
                 plt.plot([tbeg,tend],[0,0],'ro')
-
+                ib = int((tbeg+sacdata.o-sacdata.b)/sacdata.delta)
+                ie = ib+int((tend-tbeg)/sacdata.delta)
+                if ib<0:
+                    ib = 0
+                if ie>sacdata.npts:
+                    ie = sacdata.npts
+                a    = np.absolute(sacdata.depvar[ib:ie]).max()*1000.
+                ymin = -yfactor*a
+                ymax =  yfactor*a                
+                if variable_xlim:
+                    plt.xlim([tbeg - t0delay,tend+length*sacdata.delta])
+            ylims = [ymin,ymax]
+            plt.ylim(ylims)                    
             # Annotations
             if sacdata.kcmpnm[2] == 'Z':
                 label = r'%s %s %s %s $(\phi,\Delta) = %6.1f^{\circ}, %6.1f^{\circ}$'%(
