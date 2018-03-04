@@ -16,6 +16,7 @@ from sacpy import sac
 from .cmt  import cmt
 
 TRACES_PLOTPARAMS = {'backend': 'pdf', 'axes.labelsize': 10,
+                     'pdf.fonttype': 42, 'ps.fonttype':42,
                      'font.size': 10,
                      'xtick.labelsize': 10,
                      'ytick.labelsize': 10,
