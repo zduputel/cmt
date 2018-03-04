@@ -410,10 +410,10 @@ class cmtproblem(object):
         Prepare Green's functions
         Args:
             * GF_names : dictionary of GFs names
-            * stf : moment rate function (optionnal)
+            * stf : moment rate function (optionnal, default=None)
                 - can be a scalar giving a triangular STF half-duration
                 - can be a single array used for all stations
-                - can be a dictionary with one stf per channel id
+                - can be a dictionary with one stf per channel id (apparent STFs)
             * delay: time-shift (in sec, optional)
                 - can be a single value used for all stations
                 - can be a dictionary with one delay per channel id
