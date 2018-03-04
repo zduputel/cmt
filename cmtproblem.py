@@ -125,12 +125,16 @@ class cmtproblem(object):
         self.taper_n     = None  # Taper width 
         self.taper_left  = None  # Taper (left part)
         self.taper_right = None  # Taper (right part)
+        
         # All done
+        return
 
     def cmtinv(self,zero_trace=True,scale=1.):
         '''
-        Perform CMTinversion
-        Model will be 
+        Perform CMTinversion (stored in cmtproblem.cmt.MT)
+        Args:
+            * zero_trace: if True impose zero trace
+            * scale: M0 scale
         '''
 
         assert self.D is not None, 'D must be assigned before cmtinv'
@@ -180,6 +184,7 @@ class cmtproblem(object):
         self.global_rms = [res,nD,nS]
         
         # All done
+        return
         
     def buildD(self):
         '''
@@ -192,6 +197,7 @@ class cmtproblem(object):
         self.D = np.array(self.D)
 
         # All done
+        return
 
     def buildG(self):
         '''
@@ -206,14 +212,14 @@ class cmtproblem(object):
         self.G = np.array(self.G).T
         
         # All done
-                    
+        return
         
     def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',wpwin=False,
                     swwin=None,dcwin={},taper_width=None,o_dir=None,o_sac_lst=None):
         '''
-        Prepare Data
+        Prepare Data before cmt inversion
         Args:
-            * i_sac_lst: list of input data sac file
+            * i_sac_lst: list of input data sac file 
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
@@ -347,6 +353,7 @@ class cmtproblem(object):
             o_lst.close()
         
         # All done            
+        return
 
     def setTimeWindow(self,wpwin=False,swwin=None,dcwin={}):
         '''
@@ -541,6 +548,7 @@ class cmtproblem(object):
                 self.gf[chan_id][m] = gf_sac.copy()
 
         # All done
+        return
 
     def calcsynt(self,scale=1.,stf=None):
         '''
@@ -594,6 +602,7 @@ class cmtproblem(object):
                 
 
         # All done
+        return
 
     def deconv_projlandweber(self,duration=None,nit=1000,nit_min=100,gauss_std=6.,gauss_n=50,fwahm=None):
         '''
@@ -710,7 +719,9 @@ class cmtproblem(object):
             #plt.plot(pred)
             #plt.title(chan_id)
             #plt.show()
+
         # All done
+        return
 
     def traces(self,length=3000,i_sac_lst=None,show_win=False,swwin=None,wpwin=None,t0delay=150.,
                variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1):
@@ -875,6 +886,9 @@ class cmtproblem(object):
         plt.close()
         pp.close()       
 
+        # All done
+        return
+
     def rmsscreening(self,th=5.0):
         '''
         RMS screening
@@ -892,6 +906,7 @@ class cmtproblem(object):
                 self.chan_ids.remove(chan_id)
 
         # All done
+        return
 
     def wchanidlst(self,f_name):
         '''
@@ -902,6 +917,7 @@ class cmtproblem(object):
             fid.write('%s\n'%(chan_id))
         fid.write
         # All done
+        return
 
 
     def copy(self):
