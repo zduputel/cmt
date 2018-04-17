@@ -96,7 +96,8 @@ def conv_by_stf(sac_in,delay,half_width):
 
     # All done
     return sac_out
-        
+
+
 class cmtproblem(object):
 
     def __init__(self):
@@ -405,9 +406,9 @@ class cmtproblem(object):
         return
 
     def preparekernels(self,GF_names,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                       baseline=0,left_taper=False,wpwin=False,scale=1.):
+                       baseline=0,left_taper=False,wpwin=False,scale=1.,reload_GF=True):
         '''
-        Prepare Green's functions
+        Prepare Green's functions (stored in self.gf dictionary as sacpy instances)
         Args:
             * GF_names : dictionary of GFs names
             * stf : moment rate function (optionnal, default=None)
@@ -424,14 +425,18 @@ class cmtproblem(object):
             * left_taper: if True, apply left taper over baseline (optional)
             * wpwin: Deprecated
             * scale: scaling factor for all GFs (optional)
+            * reload_GF: option to read the GF database
+                - if True, load the Green's functions in self.gf from the GF database
+                - if False, use the Green's functions that were previously stored in self.gf                        
         '''
-
+        
         # sacpy.sac instantiation
         gf_sac = sac()
         
         # gf dictionary
-        self.gf = {}
-
+        if self.gf is None or reload_GF:
+            self.gf = {}
+        
         # Assign cmt delay
         triangular_stf = False
         if not isinstance(delay,dict): # Not a delay dictionary
@@ -443,11 +448,7 @@ class cmtproblem(object):
                 else:
                     self.cmt.hd = (len(stf)-1)*0.5
             else:
-                if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
-                    triangular_stf = True
-                    self.cmt.hd    = float(stf)
-                else:
-                    self.cmt.hd = delay
+                self.cmt.hd = delay
         else:
             if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
                 triangular_stf = True
@@ -455,13 +456,20 @@ class cmtproblem(object):
             
         # Loop over channel ids
         for chan_id in GF_names.keys():
-            self.gf[chan_id] = {}
+            read_GF = False
+            if chan_id not in self.gf or reload_GF:
+                self.gf[chan_id] = {}
+                read_GF = True
         
             # Loop over moment tensor components
             for m in self.cmt.MTnm:
+                
+                if read_GF: # Read GF sac file
+                    gf_sac.read(GF_names[chan_id][m])
+                else:       # Get GF from the self.gf dictionary
+                    gf_sac = self.gf[chan_id][m].copy()
 
-                # Read GF sac file
-                gf_sac.read(GF_names[chan_id][m])
+                # Check the sampling rate (to be improved)
                 assert np.round(gf_sac.delta,3)==1.0, 'GFs should be sampled at 1sps'
 
                 # Remove baseline
@@ -485,7 +493,7 @@ class cmtproblem(object):
                 if stf is not None:
                         
                     if triangular_stf: # Convolve with a triangular stf
-                        gf_sac.depvar = conv_by_stf(sac_in,0.,half_width)
+                        gf_sac = conv_by_stf(gf_sac,0.,self.cmt.hd)
                             
                     elif isinstance(stf,np.ndarray) or isinstance(stf,list): 
                         gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='same')
