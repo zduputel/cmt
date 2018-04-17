@@ -6,6 +6,7 @@ Written by Z. Duputel and L. Rivera, May 2015
 
 # Externals
 import numpy as np
+from datetime import datetime
 
 def gamma(az,ta):
     '''
@@ -100,6 +101,25 @@ class cmt(object):
                 self.MT[i]=float(L[i+7].strip().split(':')[1])*scale
         # All done
 
+    def hypofromPDE(self):
+        '''
+        Parses origin time and hypocenter coordinates from self.pdeline
+        '''
+        # Origin time
+        items = self.pdeline[5:].strip().split()
+        oyear  = int(items[0])
+        omonth = int(items[1])
+        oday   = int(items[2])
+        ohour  = int(items[3])
+        omin   = int(items[4])
+        osec   = int(float(items[5]))
+        omsec  = int((float(items[5])-float(osec))*1.0e6)
+        self.otime = datetime(oyear,omonth,oday,ohour,omin,osec,omsec)
+        # Hypocenter coordinates
+        self.hypo_lat = float(items[6])
+        self.hypo_lon = float(items[7])
+        self.hypo_dep = float(items[8])
+        # All done
         
     def wcmtfile(self,cmtfil,scale=1.):
         '''
@@ -310,3 +330,4 @@ class cmt(object):
         ax.imshow(pol)
         ax.set_axis_off()
         #return x,y,r,amp,pol
+
