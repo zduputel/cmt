@@ -8,6 +8,7 @@ Written by Z. Duputel and L. Rivera, May 2015
 from scipy import signal
 from scipy import linalg
 from copy  import deepcopy
+from multiprocessing import Pool, cpu_count
 import numpy as np
 import os,sys
 
@@ -97,6 +98,87 @@ def conv_by_stf(sac_in,delay,half_width):
     # All done
     return sac_out
 
+def ts_hd_misfit(inputs):
+
+    # Get cmtproblem object
+    cmtp = inputs[0]
+    cmtp_hd = cmtp.copy() 
+
+    # Parse search parameters
+    if len(inputs)==3:   # Do inversion for a single time-shift 
+        start = inputs[1]
+        ts_search = [inputs[2]]
+    elif len(inputs)==4: # Half-duration grid-search
+        start = 0
+        j = inputs[1]
+        hd = inputs[2]
+        ts_search = inputs[3]
+        # Convolve with triangle of half-duration hd
+        cmtp_hd.preparekernels(delay=0.,stf=hd,read_from_file=False,windowing=False)
+        
+    # Time-shift search
+    i = np.arange(start,start+len(ts_search))
+    rms  = np.zeros((len(ts_search),))
+    rmsn = np.zeros((len(ts_search),))
+    for k,ts in enumerate(ts_search):
+        cmtp_ts = cmtp_hd.copy()
+        # Prepare kernels
+        cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False)
+        cmtp_ts.buildG()
+        cmtp_ts.cmt.ts = ts
+    
+        # Invert
+        cmtp_ts.cmtinv(zero_trace=False)
+
+        # Get RMS misfit
+        res,nD,nS = cmtp_ts.global_rms
+        rms[k] = res/np.sqrt(float(cmtp_ts.D.size))
+        rmsn[k] = res/nD
+    
+    # All done
+    if len(inputs)==3:
+        return i,ts_search,rms,rmsn
+    else:
+        return i,j,ts_search,hd,rms,rmsn
+
+
+class parseConfigError(Exception):
+    """
+    Raised if the config file is incorrect
+    """
+    pass
+
+
+def parseConfig(cfg_file):
+    '''
+    Parse my config files and returns a config dictionary
+    Args:
+         cfg_file: configuration filename
+    '''
+
+    # Check if cfg_file exists
+    assert os.path.exists(cfg_file), 'Cannot read %s: No such file'%(cfg_file)
+
+    # Fill the config dictionary
+    config = {}
+    try:
+        config_lines = open(cfg_file, 'r').readlines()
+        for line in config_lines:
+            if line.find('#')==0:
+                continue
+            if line.rstrip():
+                key,value = line.strip().split(':')
+                key   = key.strip()
+                value = value.strip()
+                if key in config:
+                    config[key].append(value)
+                else:
+                    config[key]=value
+    except:
+        raise parseConfigError('Incorrect format in %s!\n'%cfg_file)
+
+    # All done
+    return config
 
 class cmtproblem(object):
 
@@ -216,7 +298,7 @@ class cmtproblem(object):
         return
         
     def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',wpwin=False,
-                    swwin=None,dcwin={},taper_width=None,o_dir=None,o_sac_lst=None):
+                    swwin=None,dcwin={},taper_width=None,derivate=False,o_dir=None,o_sac_lst=None):
         '''
         Prepare Data before cmt inversion
         Args:
@@ -237,7 +319,9 @@ class cmtproblem(object):
                - if wpwin=False: [tbeg,tend] list with respect to origin time
                - if wpwin=True:  [tbeg,tend] with respect to P arrival time
             * taper_width: Apply taper to data
+            * derivate: if True, will differenciate the data
             * o_dir: Output directory for filtered data (optional)
+            * o_sac_lst: output sac list (if o_dir is not None, default='o_sac_lst')
         '''
 
         # We assume delta=1
@@ -288,6 +372,10 @@ class cmtproblem(object):
             # Filter
             if filter_freq is not None:
                 data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)
+
+            # Differentiate
+            if derivate:
+                data_sac.derivate()            
 
             # Output directory for unwindowed filtered sac data
             if o_dir is not None:
@@ -405,12 +493,18 @@ class cmtproblem(object):
         # All done
         return
 
-    def preparekernels(self,GF_names,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                       baseline=0,left_taper=False,wpwin=False,scale=1.,reload_GF=True):
+    def preparekernels(self,GF_names=None,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
+                       baseline=0,left_taper=False,wpwin=False,derivate=False,scale=1.,read_from_file=True,
+                       windowing=True):
         '''
         Prepare Green's functions (stored in self.gf dictionary as sacpy instances)
         Args:
-            * GF_names : dictionary of GFs names
+            * GF_names : dictionary of GFs names (i.e., path to sac files)
+                Must be structured as follows:
+                GF_names = {'channel_id1': {'MTcmp': gf_sac_file_name, ...}, ...}
+                where:
+                    - channel_id1 is the channel id in the sacpy format "knetwk_kstnm_khole_kcmpnm"
+                    -  indicates the moment tensor component (i.e., 'rr', 'tt', 'pp', 'rt', 'rp', 'tp')
             * stf : moment rate function (optionnal, default=None)
                 - can be a scalar giving a triangular STF half-duration
                 - can be a single array used for all stations
@@ -424,9 +518,10 @@ class cmtproblem(object):
             * baseline : number of samples to remove baseline (default: no baseline)
             * left_taper: if True, apply left taper over baseline (optional)
             * wpwin: Deprecated
+            * derivate: if True, will differentiate the Green's functions
             * scale: scaling factor for all GFs (optional)
-            * reload_GF: option to read the GF database
-                - if True, load the Green's functions in self.gf from the GF database
+            * read_from_file: option to read the GF database
+                - if True, load the Green's functions from the sac files in the GF database
                 - if False, use the Green's functions that were previously stored in self.gf                        
         '''
         
@@ -434,8 +529,12 @@ class cmtproblem(object):
         gf_sac = sac()
         
         # gf dictionary
-        if self.gf is None or reload_GF:
+        if self.gf is None or read_from_file:
             self.gf = {}
+            assert GF_names is not None, 'GF_names must be specified'
+            chan_ids = GF_names.keys()
+        else:
+            chan_ids = self.chan_ids
         
         # Assign cmt delay
         triangular_stf = False
@@ -453,14 +552,15 @@ class cmtproblem(object):
             if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
                 triangular_stf = True
                 self.cmt.hd    = float(stf)
-            
+             
         # Loop over channel ids
-        for chan_id in GF_names.keys():
+        for chan_id in chan_ids:
             read_GF = False
-            if chan_id not in self.gf or reload_GF:
+            if chan_id not in self.gf or read_from_file:
                 self.gf[chan_id] = {}
+                assert chan_id in GF_names, 'missing channel id (%s)'%(chan_id)
                 read_GF = True
-        
+             
             # Loop over moment tensor components
             for m in self.cmt.MTnm:
                 
@@ -468,16 +568,16 @@ class cmtproblem(object):
                     gf_sac.read(GF_names[chan_id][m])
                 else:       # Get GF from the self.gf dictionary
                     gf_sac = self.gf[chan_id][m].copy()
-
+                 
                 # Check the sampling rate (to be improved)
                 assert np.round(gf_sac.delta,3)==1.0, 'GFs should be sampled at 1sps'
-
+                 
                 # Remove baseline
                 if baseline>0:
                     ibase = int(baseline/gf_sac.delta)
                     av = gf_sac.depvar[:ibase].mean()
                     gf_sac.depvar -= av                    
-
+                 
                 # Left taper
                 if left_taper:
                     assert baseline>0., 'Baseline must be >0. for left taper' 
@@ -485,10 +585,10 @@ class cmtproblem(object):
                     ang = np.pi / baseline
                     inds = np.arange(ibase)
                     gf_sac.depvar[inds] *= (1.0 - np.cos(inds*ang))/2.
-                
+                 
                 # Scale GFs
                 gf_sac.depvar *= scale
-
+                 
                 # Convolve with STF(s)
                 if stf is not None:
                         
@@ -508,13 +608,16 @@ class cmtproblem(object):
                     gf_sac.b += delay[chan_id]                    
                 else:
                     gf_sac.b += delay
-                        
+
                 # Filter
                 if filter_freq is not None:
                     gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
 
+                if derivate:
+                    gf_sac.derivate()            
+
                 # Time-window matching data
-                if self.data is not None:
+                if self.data is not None and windowing is not False:
                     assert chan_id in self.data, 'No channel id %s in data'%(chan_id)
                     data_sac = self.data[chan_id]                    
                     b    = data_sac.b - data_sac.o
@@ -557,6 +660,72 @@ class cmtproblem(object):
 
         # All done
         return
+    
+    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,filter_btype='bandpass',
+                         derivate=False,ncpu=None):
+        '''
+        Performs a grid-search to get optimum centroid time-shifts and half-duration
+        Args:
+            * ts_search: time-shift values to be explored (list or ndarray)
+            * hd_search: half-duration values to be explored (list or ndarray)
+            * GF_names : dictionary of GFs names (see preparekernels)
+            * filter_freq (optional): filter corner frequencies (see sacpy.filter)
+            * filter_order (optional): default is 4 (see sacpy.filter)
+            * filter_btype (optional): default is 'bandpass' (see sacpy.filter) 
+            * ncpu (optional): number of cpus (default is the number of CPUs in the system)
+        '''
+
+        # Number of cores
+        if ncpu is None:
+            ncpu = cpu_count()
+
+        # Initialize rms arrays
+        rms  = np.zeros((len(ts_search),len(hd_search)))
+        rmsn = np.zeros((len(ts_search),len(hd_search)))
+        
+        # Initialize the grid-search
+        todo = []
+        if len(hd_search)==1: # Parallelism is done with respect to ts_search
+            # Prepare the kernels
+            self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,
+                                filter_btype=filter_btype,derivate=derivate,windowing=False)
+            # Todo list
+            for i,ts in enumerate(ts_search):
+                todo.append([self,i,ts])
+        else: # Parallelism is done with respect to hd_search
+            # Prepare the kernels
+            self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
+                                filter_btype=filter_btype,derivate=derivate,windowing=False)
+            # Todo list
+            for j,hd in enumerate(hd_search):
+                todo.append([self,j,hd,ts_search])
+                
+        # Do the grid-search
+        print(ncpu)
+        pool = Pool(ncpu)
+        outputs = pool.map(ts_hd_misfit,todo)
+
+        # Fill out the rms matrices
+        rms  = np.zeros((len(ts_search),len(hd_search)))
+        rmsn = np.zeros((len(ts_search),len(hd_search)))
+        for output in outputs:
+            # Parse outputs
+            if len(hd_search)==1:
+                j  = 0
+                i  = output[0]
+                r  = output[2]
+                rn = output[3]
+            else:
+                i  = output[0]
+                j  = output[1]
+                r  = output[4]
+                rn = output[5]
+            # Fill out rms
+            rms[i,j]  = r
+            rmsn[i,j] = rn
+        # All done
+        return rms, rmsn
+        
 
     def calcsynt(self,scale=1.,stf=None):
         '''
