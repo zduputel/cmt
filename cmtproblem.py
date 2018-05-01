@@ -99,22 +99,36 @@ def conv_by_stf(sac_in,delay,half_width):
     return sac_out
 
 def ts_hd_misfit(inputs):
-
+    '''
+    Sub-function for time-shift and half-duration grid-search
+    Args:
+        * inputs: tuple including input parameters with two options:
+        - 4 params: ts_index, ts_val, zero_trace 
+          (do inversion for a single time-shift)
+           When 4 parameters are used, Green's functions are already 
+           convolved with a STF
+        - 5 params: hd_index, hd_val, ts_search, zero_trace 
+          (do inversion for a series of time-shifts)
+           When 5 parameters are used, Green's functions are convolved 
+           with a triangular STF of a specified hd_value
+    ''' 
     # Get cmtproblem object
     cmtp = inputs[0]
     cmtp_hd = cmtp.copy() 
-
+     
     # Parse search parameters
-    if len(inputs)==3:   # Do inversion for a single time-shift 
+    if len(inputs)==4:   # Do inversion for a single time-shift
         start = inputs[1]
         ts_search = [inputs[2]]
-    elif len(inputs)==4: # Half-duration grid-search
+        zero_trace = inputs[3]
+    elif len(inputs)==5: # Half-duration grid-search
         start = 0
         j = inputs[1]
         hd = inputs[2]
         ts_search = inputs[3]
         # Convolve with triangle of half-duration hd
         cmtp_hd.preparekernels(delay=0.,stf=hd,read_from_file=False,windowing=False)
+        zero_trace = inputs[4]
         
     # Time-shift search
     i = np.arange(start,start+len(ts_search))
@@ -126,17 +140,17 @@ def ts_hd_misfit(inputs):
         cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False)
         cmtp_ts.buildG()
         cmtp_ts.cmt.ts = ts
-    
+         
         # Invert
-        cmtp_ts.cmtinv(zero_trace=False)
-
+        cmtp_ts.cmtinv(zero_trace=zero_trace)
+         
         # Get RMS misfit
         res,nD,nS = cmtp_ts.global_rms
         rms[k] = res/np.sqrt(float(cmtp_ts.D.size))
         rmsn[k] = res/nD
-    
+     
     # All done
-    if len(inputs)==3:
+    if len(inputs)==4:
         return i,ts_search,rms,rmsn
     else:
         return i,j,ts_search,hd,rms,rmsn
@@ -661,8 +675,8 @@ class cmtproblem(object):
         # All done
         return
     
-    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                         derivate=False,ncpu=None):
+    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,
+                        filter_btype='bandpass',derivate=False,zero_trace=True,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -674,15 +688,15 @@ class cmtproblem(object):
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter) 
             * ncpu (optional): number of cpus (default is the number of CPUs in the system)
         '''
-
+         
         # Number of cores
         if ncpu is None:
             ncpu = cpu_count()
-
+         
         # Initialize rms arrays
         rms  = np.zeros((len(ts_search),len(hd_search)))
         rmsn = np.zeros((len(ts_search),len(hd_search)))
-        
+         
         # Initialize the grid-search
         todo = []
         if len(hd_search)==1: # Parallelism is done with respect to ts_search
@@ -691,20 +705,19 @@ class cmtproblem(object):
                                 filter_btype=filter_btype,derivate=derivate,windowing=False)
             # Todo list
             for i,ts in enumerate(ts_search):
-                todo.append([self,i,ts])
+                todo.append([self,i,ts,zero_trace])
         else: # Parallelism is done with respect to hd_search
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
                                 filter_btype=filter_btype,derivate=derivate,windowing=False)
             # Todo list
             for j,hd in enumerate(hd_search):
-                todo.append([self,j,hd,ts_search])
+                todo.append([self,j,hd,ts_search,zero_trace])
                 
         # Do the grid-search
-        print(ncpu)
         pool = Pool(ncpu)
         outputs = pool.map(ts_hd_misfit,todo)
-
+         
         # Fill out the rms matrices
         rms  = np.zeros((len(ts_search),len(hd_search)))
         rmsn = np.zeros((len(ts_search),len(hd_search)))
