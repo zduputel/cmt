@@ -339,10 +339,6 @@ class cmtproblem(object):
             * o_sac_lst: output sac list (if o_dir is not None, default='o_sac_lst')
         '''
         
-        # Get delta (should be identical for all channels)
-        data_sac = sac(ifiles[0])
-        self.delta = data_sac.delta
-        
         # Read sac file list
         L = open(i_sac_lst).readlines()
         ifiles = []
@@ -357,6 +353,10 @@ class cmtproblem(object):
                 o_sac_lst=os.path.join(o_dir,'o_sac_lst')
             o_lst = open(o_sac_lst,'wt')            
         
+        # Get delta (should be identical for all channels)
+        data_sac = sac(ifiles[0])
+        self.delta = data_sac.delta
+
         # Instantiate data dict
         self.data = {}
         self.chan_ids = []
