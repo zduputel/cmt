@@ -209,6 +209,7 @@ class cmtproblem(object):
         self.gf   = None  # Green's functions sac object      
         self.D = None     # Data vector
         self.G = None     # Green's function matrix
+        self.delta = None # Data sampling step
         self.twin = {}    # Time-window dictionary
         # RMS misfit
         self.global_rms = None # Global RMS misfit
@@ -337,9 +338,10 @@ class cmtproblem(object):
             * o_dir: Output directory for filtered data (optional)
             * o_sac_lst: output sac list (if o_dir is not None, default='o_sac_lst')
         '''
-
-        # We assume delta=1
-        delta = 1.
+        
+        # Get delta (should be identical for all channels)
+        data_sac = sac(ifiles[0])
+        self.delta = data_sac.delta
         
         # Read sac file list
         L = open(i_sac_lst).readlines()
@@ -349,40 +351,40 @@ class cmtproblem(object):
             if l[0]=='#':
                 continue            
             ifiles.append(l.strip().split()[0])
-
+        
         if o_dir is not None:
             if o_sac_lst is None:
                 o_sac_lst=os.path.join(o_dir,'o_sac_lst')
             o_lst = open(o_sac_lst,'wt')            
+        
+        # Instantiate data dict
+        self.data = {}
+        self.chan_ids = []
+        
+        # Instantiate sacpy.sac
+        data_sac = sac()        
+        
+        # Instanciate time window dictionary
+        self.twin = {}
 
         # Hanning taper
         self.taper = False
         if taper_width is not None:
-            self.taper   = True
-            self.taper_n = int(taper_width/delta)
+            self.taper = True
+            self.taper_n = int(taper_width/self.delta)
             H  = np.hanning(2*self.taper_n)
             zeros = np.zeros((self.taper_n))
             self.taper_left  = np.append(zeros,H[:self.taper_n])
             self.taper_right = np.append(H[self.taper_n:],zeros)
             self.taper_n *= 2
-                     
-        # Instantiate data dict
-        self.data = {}
-        self.chan_ids = []
-
-        # Instantiate sacpy.sac
-        data_sac = sac()        
-
-        # Instanciate time window dictionary
-        self.twin = {}
         
         # Loop over sac_files
         for ifile in ifiles:
-
+            
             # Read sac file            
             data_sac.read(ifile)
-            assert np.round(data_sac.delta,3)==delta, 'data should be sampled at 1sps'
-
+            assert np.round(data_sac.delta,3)==self.delta, 'data should be sampled at 1sps'
+            
             # Filter
             if filter_freq is not None:
                 data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)
@@ -584,7 +586,7 @@ class cmtproblem(object):
                     gf_sac = self.gf[chan_id][m].copy()
                  
                 # Check the sampling rate (to be improved)
-                assert np.round(gf_sac.delta,3)==1.0, 'GFs should be sampled at 1sps'
+                assert np.round(gf_sac.delta,3)==self.delta, 'GFs should be sampled with data sampling step (%.3f s)'%(self.delta)
                  
                 # Remove baseline
                 if baseline>0:
@@ -636,7 +638,6 @@ class cmtproblem(object):
                     data_sac = self.data[chan_id]                    
                     b    = data_sac.b - data_sac.o
                     npts = data_sac.npts                    
-                    assert np.round(data_sac.delta,3)==1.0, 'data should be sampled at 1sps'
                     t    = np.arange(gf_sac.npts)*gf_sac.delta+gf_sac.b-gf_sac.o
                     if wpwin:
                         t0 = data_sac.t[0]-data_sac.o
