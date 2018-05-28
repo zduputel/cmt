@@ -990,7 +990,7 @@ class cmtproblem(object):
             t0 = t1[0] - t0delay
             if t0<0.:
                 t0 = 0.
-            plt.xlim([t0,t0+length*sacdata.delta])
+            plt.xlim([t0,t0+length])
             a    = np.absolute(sacdata.depvar).max()*1000.
             ymin = -yfactor*a
             ymax =  yfactor*a
@@ -1028,7 +1028,7 @@ class cmtproblem(object):
                 ymin = -yfactor*a
                 ymax =  yfactor*a                
                 if variable_xlim:
-                    plt.xlim([tbeg - t0delay,tend+length*sacdata.delta])
+                    plt.xlim([tbeg - t0delay,tend+length])
             ylims = [ymin,ymax]
             plt.ylim(ylims)                    
             # Annotations
