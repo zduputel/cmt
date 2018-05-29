@@ -13,8 +13,9 @@ import numpy as np
 import os,sys
 
 # Personals
-from sacpy import sac
-from .cmt  import cmt
+from sacpy  import sac
+from .cmt   import cmt
+from .force import force
 
 TRACES_PLOTPARAMS = {'backend': 'pdf', 'axes.labelsize': 10,
                      'pdf.fonttype': 42, 'ps.fonttype':42,
@@ -55,8 +56,45 @@ def Pplus(h,tvec,stfdur):
             stf[i]=0.0
     return stf
 
+def conv_by_sin_stf(sac_in,delay,half_width):
+    '''
+    Convolve by a Sinusoid STF with 1 negative and 1 positive lobes (could be appropriate for a single force)
+    '''
+    # Copy sac
+    sac_out = sac_in.copy()
 
-def conv_by_stf(sac_in,delay,half_width):
+    # Build half-sinusoidal STF
+    lh = int(np.floor(half_width/sac_in.delta + 0.5))
+    LH = lh + 1
+    h = np.sin(np.pi*np.arange(LH)/lh)
+
+    # Weighted average
+    sac_out.depvar *= 0.
+    for i in range(sac_in.npts):
+        il  = i
+        ir  = i
+        cum = h[0] * sac_in.depvar[i]
+        for j in range(1,LH):
+            il -= 1
+            ir += 1
+            if il < 0.:
+                xl = 0.
+            else:
+                xl = sac_in.depvar[il]
+            if ir >= sac_in.npts:
+                xr = 0.
+            else:
+                xr = -sac_in.depvar[ir]
+            cum += h[j] * (xl + xr)
+        sac_out.depvar[i] = cum
+
+    # Delay trace
+    sac_out.b += delay
+
+    # All done
+    return sac_out
+
+def conv_by_tri_stf(sac_in,delay,half_width):
     '''
     Convolve by a triangular STF
     '''
@@ -196,9 +234,11 @@ def parseConfig(cfg_file):
 
 class cmtproblem(object):
 
-    def __init__(self):
+    def __init__(self,force_flag=False):
         '''
         Constructor
+        Args:
+            * force_flag: if True, invert for a force (default=False)
         '''
 
         # List of channel ids
@@ -216,6 +256,9 @@ class cmtproblem(object):
         self.rms  = None       # RMS misfit per station
         # CMT object
         self.cmt = cmt()
+        self.force_flag = force_flag
+        if self.force_flag:
+            self.force = force()
         # Deconvolution
         self.duration    = None
         # Tapering
@@ -283,6 +326,53 @@ class cmtproblem(object):
         
         # All done
         return
+
+    def forceinv(self,pure_vertical=False,scale=1.,rcond=1e-4):
+        '''
+        Perform CMTinversion (stored in cmtproblem.cmt.MT)
+        Args:
+            * pure_vertical: if True impose a pure vertical force
+            * scale: M0 scale
+            * rcond: Cut-off ratio  small singular values (default: 1e-4)
+        '''
+
+        # Check things before doing inversion
+        assert self.D is not None, 'D must be assigned before cmtinv'
+        assert self.G is not None, 'G must be assigned before cmtinv'
+        assert self.force_flag is True, 'cmtproblem not properly initialized (self.force_flag != True)'
+
+        # Compute GtG
+        if pure_vertical:
+            G = self.G[:,-1]
+        else:
+            G = self.G
+        
+        # Inversion
+        if pure_vertical:
+            m = (G.T.dot(self.D))/(G.T.dot(G))
+        else:
+            m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+    
+        # Populate cmt attributes
+        if pure_vertical:
+            self.force.F = np.zeros((3,))
+            self.force.F[-1] = m.copy()
+        else:
+            self.force.F = m.copy()
+
+        # Fill-out global rms values
+        S  = G.dot(m)
+        res = self.D - S
+        res = np.sqrt(res.dot(res)/res.size)
+        nD  = np.sqrt(self.D.dot(self.D)/self.D.size)
+        nS  = np.sqrt(S.dot(S)/S.size)
+        self.global_rms = [res,nD,nS]
+
+        # Scale force vector
+        m *= scale
+        
+        # All done
+        return
         
     def buildD(self):
         '''
@@ -303,10 +393,16 @@ class cmtproblem(object):
         '''
         
         self.G = []
-        for mt in self.cmt.MTnm:
-            self.G.append([])
-            for chan_id in self.chan_ids:
-                self.G[-1].extend(self.gf[chan_id][mt].depvar)
+        if self.force_flag:
+            for f in self.force.Fnm:
+                self.G.append([])
+                for chan_id in self.chan_ids:
+                    self.G[-1].extend(self.gf[chan_id][f].depvar)
+        else:
+            for mt in self.cmt.MTnm:
+                self.G.append([])
+                for chan_id in self.chan_ids:
+                    self.G[-1].extend(self.gf[chan_id][mt].depvar)
         self.G = np.array(self.G).T
         
         # All done
@@ -554,20 +650,36 @@ class cmtproblem(object):
         
         # Assign cmt delay
         triangular_stf = False
+        sinusoidal_stf = False
         if not isinstance(delay,dict): # Not a delay dictionary
             self.cmt.ts = delay
+            if self.force_flag:
+                self.force.ts = delay
             if stf is not None:
                 if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
                     triangular_stf = True
                     self.cmt.hd    = float(stf)
+                    if self.force_flag:
+                        self.force.hd = float(stf)
+                        triangular_stf = False
+                        sinusoidal_stf = True
                 else:
                     self.cmt.hd = (len(stf)-1)*0.5
+                    if self.force_flag:
+                        self.force.hd = (len(stf)-1)*0.5
+                        
             else:
                 self.cmt.hd = delay
+                if self.force_flag:
+                    self.force.hd = delay
         else:
             if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
                 triangular_stf = True
                 self.cmt.hd    = float(stf)
+                if self.force_flag:
+                    self.force.hd    = float(stf)
+                    triangular_stf = False
+                    sinusoidal_stf = True
              
         # Loop over channel ids
         for chan_id in chan_ids:
@@ -577,8 +689,11 @@ class cmtproblem(object):
                 assert chan_id in GF_names, 'missing channel id (%s)'%(chan_id)
                 read_GF = True
              
-            # Loop over moment tensor components
-            for m in self.cmt.MTnm:
+            # Loop over moment-tensor/force components
+            nms = self.cmt.MTnm
+            if self.force_flag:
+                nms=self.force.Fnm
+            for m in nms:
                 
                 if read_GF: # Read GF sac file
                     gf_sac.read(GF_names[chan_id][m])
@@ -609,7 +724,10 @@ class cmtproblem(object):
                 if stf is not None:
                         
                     if triangular_stf: # Convolve with a triangular stf
-                        gf_sac = conv_by_stf(gf_sac,0.,self.cmt.hd)
+                        gf_sac = conv_by_tri_stf(gf_sac,0.,self.cmt.hd)
+
+                    elif sinusoidal_stf:
+                        gf_sac = conv_by_sin_stf(gf_sac,0.,self.cmt.hd)
                             
                     elif isinstance(stf,np.ndarray) or isinstance(stf,list): 
                         gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='same')
@@ -748,7 +866,10 @@ class cmtproblem(object):
 
         # Check that gf and cmt are assigned
         assert self.gf is not None, 'Green s function must be computed'
-        assert self.cmt.MT[0] is not None, 'Moment tensor must be assigned'
+        if self.force_flag:
+            assert self.force.F[0] is not None, 'Force must be assigned'
+        else:
+            assert self.cmt.MT[0] is not None, 'Moment tensor must be assigned'
 
         # Assign synt
         self.synt = {}
@@ -762,9 +883,14 @@ class cmtproblem(object):
             self.synt[chan_id] = self.data[chan_id].copy()
             self.synt[chan_id].depvar *= 0.
             # Loop over moment tensor components
-            for m in range(6):
-                MTnm=self.cmt.MTnm[m]
-                self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
+            if self.force_flag:
+                for m in range(3):
+                    Fnm=self.force.Fnm[m]
+                    self.synt[chan_id].depvar += self.force.F[m]*self.gf[chan_id][Fnm].depvar*scale
+            else:
+                for m in range(6):
+                    MTnm=self.cmt.MTnm[m]
+                    self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
             # STF convolution
             if stf is not None:
                 npts_fft = nextpow2(self.synt[chan_id].npts)
