@@ -84,8 +84,8 @@ def conv_by_sin_stf(sac_in,delay,half_width):
             if ir >= sac_in.npts:
                 xr = 0.
             else:
-                xr = -sac_in.depvar[ir]
-            cum += h[j] * (xl + xr)
+                xr = sac_in.depvar[ir]
+            cum += h[j] * (xr - xl)
         sac_out.depvar[i] = cum
 
     # Delay trace
@@ -270,12 +270,13 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,scale=1.):
+    def cmtinv(self,zero_trace=True,scale=1.,rcond=1e-4):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
             * zero_trace: if True impose zero trace
             * scale: M0 scale
+            * rcond: Cut-off ratio  small singular values (default: 1e-4)
         '''
 
         assert self.D is not None, 'D must be assigned before cmtinv'
@@ -291,16 +292,17 @@ class cmtproblem(object):
         else:
             G = self.G
 
-        # Compute GtG
-        GtG = G.T.dot(G)
+        # Moment tensor inversion
+        m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
 
-        # Compute Cm
-        Cm = linalg.inv(GtG)
+        # Fill-out the global RMS attribute
+        S  = G.dot(m)
+        res = self.D - S
+        res = np.sqrt(res.dot(res)/res.size)
+        nD  = np.sqrt(self.D.dot(self.D)/self.D.size)
+        nS  = np.sqrt(S.dot(S)/S.size)
+        self.global_rms = [res,nD,nS]
         
-        # Moment tensor
-        Dp = G.T.dot(self.D)
-        m  = Cm.dot(Dp)
-
         # Scale moment tensor
         m *= scale
 
@@ -316,14 +318,6 @@ class cmtproblem(object):
         else:
             self.cmt.MT = m.copy()
 
-        S  = G.dot(m)
-        S /= scale
-        res = self.D - S
-        res = np.sqrt(res.dot(res)/res.size)
-        nD  = np.sqrt(self.D.dot(self.D)/self.D.size)
-        nS  = np.sqrt(S.dot(S)/S.size)
-        self.global_rms = [res,nD,nS]
-        
         # All done
         return
 
@@ -353,12 +347,7 @@ class cmtproblem(object):
         else:
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
     
-        # Populate cmt attributes
-        if pure_vertical:
-            self.force.F = np.zeros((3,))
-            self.force.F[-1] = m.copy()
-        else:
-            self.force.F = m.copy()
+        print(m)
 
         # Fill-out global rms values
         S  = G.dot(m)
@@ -371,6 +360,13 @@ class cmtproblem(object):
         # Scale force vector
         m *= scale
         
+        # Populate cmt attributes
+        if pure_vertical:
+            self.force.F = np.zeros((3,))
+            self.force.F[-1] = m.copy()
+        else:
+            self.force.F = m.copy()
+
         # All done
         return
         
