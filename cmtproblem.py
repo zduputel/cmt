@@ -158,7 +158,10 @@ def ts_hd_misfit(inputs):
     if len(inputs)==4:   # Do inversion for a single time-shift
         start = inputs[1]
         ts_search = [inputs[2]]
-        zero_trace = inputs[3]
+        if cmtp.force_flag:
+            vertical_force = inputs[3]
+        else:
+            zero_trace = inputs[3]
     elif len(inputs)==5: # Half-duration grid-search
         start = 0
         j = inputs[1]
@@ -166,7 +169,10 @@ def ts_hd_misfit(inputs):
         ts_search = inputs[3]
         # Convolve with triangle of half-duration hd
         cmtp_hd.preparekernels(delay=0.,stf=hd,read_from_file=False,windowing=False)
-        zero_trace = inputs[4]
+        if cmtp.force_flag:
+            vertical_force = inputs[4]
+        else:
+            zero_trace = inputs[4]
         
     # Time-shift search
     i = np.arange(start,start+len(ts_search))
@@ -180,7 +186,10 @@ def ts_hd_misfit(inputs):
         cmtp_ts.cmt.ts = ts
          
         # Invert
-        cmtp_ts.cmtinv(zero_trace=zero_trace)
+        if cmtp_ts.force_flag:
+            cmtp_ts.forceinv(vertical_force=vertical_force)
+        else:
+            cmtp_ts.cmtinv(zero_trace=zero_trace)
          
         # Get RMS misfit
         res,nD,nS = cmtp_ts.global_rms
@@ -270,11 +279,12 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,scale=1.,rcond=1e-4):
+    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
             * zero_trace: if True impose zero trace
+            * MT: optional, constrain the focal mechanism (only invert M0)
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
         '''
@@ -282,8 +292,10 @@ class cmtproblem(object):
         assert self.D is not None, 'D must be assigned before cmtinv'
         assert self.G is not None, 'G must be assigned before cmtinv'
 
-        # Zero trace
-        if zero_trace:
+        # Constraints
+        if MT is not None: # Fixing the focal mechanism (only invert M0)
+            G = self.G.dot(MT)
+        elif zero_trace: # Zero trace
             G = np.empty((self.D.size,5))
             for i in range(2):
                 G[:,i] = self.G[:,i] - self.G[:,2]
@@ -293,7 +305,10 @@ class cmtproblem(object):
             G = self.G
 
         # Moment tensor inversion
-        m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+        if MT is not None:
+            m = (G.T.dot(self.D))/(G.T.dot(G))
+        else:
+            m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
 
         # Fill-out the global RMS attribute
         S  = G.dot(m)
@@ -308,7 +323,9 @@ class cmtproblem(object):
 
         # Populate cmt attribute
         self.cmt.MT = np.zeros((6,))
-        if zero_trace:
+        if MT is not None:
+            self.cmt.MT = m * MT.copy()
+        elif zero_trace:
             self.cmt.MT[5] = m[4]
             self.cmt.MT[4] = m[3]
             self.cmt.MT[3] = m[2]
@@ -321,34 +338,32 @@ class cmtproblem(object):
         # All done
         return
 
-    def forceinv(self,pure_vertical=False,scale=1.,rcond=1e-4):
+    def forceinv(self,vertical_force=False,scale=1.,rcond=1e-4):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
-            * pure_vertical: if True impose a pure vertical force
+            * vertical_force: if True impose a pure vertical force
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
         '''
 
         # Check things before doing inversion
-        assert self.D is not None, 'D must be assigned before cmtinv'
-        assert self.G is not None, 'G must be assigned before cmtinv'
+        assert self.D is not None, 'D must be assigned before forceinv'
+        assert self.G is not None, 'G must be assigned before forceinv'
         assert self.force_flag is True, 'cmtproblem not properly initialized (self.force_flag != True)'
 
         # Compute GtG
-        if pure_vertical:
+        if vertical_force:
             G = self.G[:,-1]
         else:
             G = self.G
         
         # Inversion
-        if pure_vertical:
+        if vertical_force:
             m = (G.T.dot(self.D))/(G.T.dot(G))
         else:
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
     
-        print(m)
-
         # Fill-out global rms values
         S  = G.dot(m)
         res = self.D - S
@@ -361,7 +376,7 @@ class cmtproblem(object):
         m *= scale
         
         # Populate cmt attributes
-        if pure_vertical:
+        if vertical_force:
             self.force.F = np.zeros((3,))
             self.force.F[-1] = m.copy()
         else:
@@ -791,7 +806,7 @@ class cmtproblem(object):
         return
     
     def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,
-                        filter_btype='bandpass',derivate=False,zero_trace=True,ncpu=None):
+                        filter_btype='bandpass',derivate=False,zero_trace=True,vertical_force=False,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -801,6 +816,9 @@ class cmtproblem(object):
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter) 
+            * derivate (optional): default is False (do not derivate green's functions)
+            * zero_trace (optional) : default is True (impose zero trace)
+            * vertical_force (optional) : default is False (if True impose vertical force for single force inversion)
             * ncpu (optional): number of cpus (default is the number of CPUs in the system)
         '''
          
@@ -812,6 +830,11 @@ class cmtproblem(object):
         rms  = np.zeros((len(ts_search),len(hd_search)))
         rmsn = np.zeros((len(ts_search),len(hd_search)))
          
+        # constrain (zero_trace or vertical_force)
+        constraint = zero_trace
+        if self.force_flag:
+            constraint = vertical_force        
+
         # Initialize the grid-search
         todo = []
         if len(hd_search)==1: # Parallelism is done with respect to ts_search
@@ -820,14 +843,14 @@ class cmtproblem(object):
                                 filter_btype=filter_btype,derivate=derivate,windowing=False)
             # Todo list
             for i,ts in enumerate(ts_search):
-                todo.append([self,i,ts,zero_trace])
+                todo.append([self,i,ts,constraint])
         else: # Parallelism is done with respect to hd_search
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
                                 filter_btype=filter_btype,derivate=derivate,windowing=False)
             # Todo list
             for j,hd in enumerate(hd_search):
-                todo.append([self,j,hd,ts_search,zero_trace])
+                todo.append([self,j,hd,ts_search,constraint])
                 
         # Do the grid-search
         pool = Pool(ncpu)
