@@ -43,10 +43,10 @@ TRACES_PLOTPARAMS = {'backend': 'pdf', 'axes.labelsize': 10,
                      'figure.figsize': [11.69,8.270]}
 
 def nextpow2(i): 
-	n = 2 
-	while n < i: 
-		n = n * 2 
-	return n
+    n = 2 
+    while n < i: 
+        n = n * 2 
+    return n
 
 def Pplus(h,tvec,stfdur):
     stf = h.copy()
@@ -246,22 +246,22 @@ class cmtproblem(object):
     def __init__(self,cmt_flag=False,force_flag=False):
         '''
         Constructor
-		Args: 
-			* cmt_flag: if True (default), invert for cmt parameters
+        Args: 
+            * cmt_flag: if True (default), invert for cmt parameters
             * force_flag: if True, invert for a force (default=False)
-		Remarks:
-		- If cmt_flag and force_flag are True, invert for a complex source including 
-		  cmt and single force parameters (see cmtforceinv). 
-		- If cmt_flag and force_flag are both False, will invert for cmt parameters
-	      only.
+        Remarks:
+        - If cmt_flag and force_flag are True, invert for a complex source including 
+          cmt and single force parameters (see cmtforceinv). 
+        - If cmt_flag and force_flag are both False, will invert for cmt parameters
+          only.
         '''
 
-		# Setting cmt_flag and force_flag flags
+        # Setting cmt_flag and force_flag flags
         self.force_flag = force_flag
-		if cmt_flag is False and force_flag is False:
-			self.cmt_flag = True
-		else:
-			self.cmt_flag   = cmt_flag
+        if cmt_flag is False and force_flag is False:
+            self.cmt_flag = True
+        else:
+            self.cmt_flag   = cmt_flag
 
         # List of channel ids
         self.chan_ids = []
@@ -371,7 +371,7 @@ class cmtproblem(object):
         assert self.D is not None, 'D must be assigned before forceinv'
         assert self.G is not None, 'G must be assigned before forceinv'
         assert self.force_flag is True, 'cmtproblem not properly initialized (self.force_flag != True)'
-        assert self.G.shape[1] == 6, 'cmtproblem not properly initialized for single force (%d collumns in self.G)'%(self.G.shape[1])
+        assert self.G.shape[1] == 3, 'cmtproblem not properly initialized for single force (%d collumns in self.G)'%(self.G.shape[1])
 
         # Get the Green's functions
         if vertical_force:
@@ -444,9 +444,9 @@ class cmtproblem(object):
         else:
             Gforce = self.G[:,6:].copy()
 
-		# Building the G matrix	
-		G = np.append(Gcmt,Gforce,axis=1)
-		
+        # Building the G matrix 
+        G = np.append(Gcmt,Gforce,axis=1)
+        
         # Moment tensor inversion
         m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
 
@@ -505,24 +505,24 @@ class cmtproblem(object):
         Build G matrices from data dictionary
         '''
 
-		# Initialize G matrix
-		self.G = []
-		
-		# CMT parameters
-		if self.cmt_flag:
+        # Initialize G matrix
+        self.G = []
+        
+        # CMT parameters
+        if self.cmt_flag:
             for mt in self.cmt.MTnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
                     self.G[-1].extend(self.gf[chan_id][mt].depvar)
-		
-		# FORCE parameters
+        
+        # FORCE parameters
         if self.force_flag:
             for f in self.force.Fnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
                     self.G[-1].extend(self.gf[chan_id][f].depvar)
 
-		# Final touch
+        # Final touch
         self.G = np.array(self.G).T
         
         # All done
@@ -739,13 +739,13 @@ class cmtproblem(object):
                     -  indicates the moment tensor component (i.e., 'rr', 'tt', 'pp', 'rt', 'rp', 'tp')
             * stf : moment rate function (optionnal, default=None)
                 - can be a scalar giving a triangular (cmt) or sinusoidal (force) STF half-duration
-				- can be a list or array of len==2 with triangular and sinusoidal hald-furation when 
-				  inverting for both cmt and force parameters
+                - can be a list or array of len==2 with triangular and sinusoidal hald-furation when 
+                  inverting for both cmt and force parameters
                 - can be a single array used for all stations
                 - can be a dictionary with one stf per channel id (apparent STFs)
             * delay: time-shift (in sec, optional)
                 - can be a single value used for all stations
-				- can be a list or array of len==2 when inverting for both force and cmt parameters
+                - can be a list or array of len==2 when inverting for both force and cmt parameters
                 - can be a dictionary with one delay per channel id
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
@@ -775,14 +775,15 @@ class cmtproblem(object):
         triangular_stf = False
         sinusoidal_stf = False
         if not isinstance(delay,dict): # Not a delay dictionary
-			if len(delay)>1:
-				assert self.cmt_flag is True and self.force_flag is True, 'Incorrect delay in preparekernels'
-            	self.cmt.ts = delay[0]
-				self.force.ts = delay[1]
-			else:
-            	self.cmt.ts = delay
-            	if self.force_flag:
-                	self.force.ts = delay
+            if isinstance(delay,float) or isinstance(delay,int):
+                self.cmt.ts = delay
+                if self.force_flag:
+                    self.force.ts = delay
+            else:
+                assert len(delay)==2, 'Incorrect input delay'
+                assert self.cmt_flag is True and self.force_flag is True, 'Incorrect delay in preparekernels'
+                self.cmt.ts = delay[0]
+                self.force.ts = delay[1]
             if stf is not None:
                 if isinstance(stf,float) or isinstance(stf,int): # Triangular stf (cmt) or sinusoidal (force)
                     triangular_stf = True
@@ -791,25 +792,26 @@ class cmtproblem(object):
                         self.force.hd = float(stf)
                         triangular_stf = False
                         sinusoidal_stf = True
-				elif len(stf) == 2: # half-durations for both force and cmt parameters
-					assert self.cmt_flag is True and self.force_flag is True, 'Incorrect stf in preparekernels'
-					triangular_stf = True
-					sinusoidal_stf = True
-					self.cmt.hd    = float(stf[0])
-					self.force.hd  = float(stf[1])
+                elif len(stf) == 2: # half-durations for both force and cmt parameters
+                    assert self.cmt_flag is True and self.force_flag is True, 'Incorrect stf in preparekernels'
+                    triangular_stf = True
+                    sinusoidal_stf = True
+                    self.cmt.hd    = float(stf[0])
+                    self.force.hd  = float(stf[1])
                 else:               # half duration is half the len of stf
                     self.cmt.hd = (len(stf)-1)*0.5
                     if self.force_flag:
                         self.force.hd = (len(stf)-1)*0.5
                         
             else:
-				if len(delay)>1:   
-					self.cmt.hd   = delay[0]
-					self.force.hd = delay[1]
-				else:	
-                	self.cmt.hd = delay
-                	if self.force_flag:
-                    	self.force.hd = delay
+                if isinstance(delay,float) or isinstance(delay,int):
+                    self.cmt.hd = delay
+                    if self.force_flag:
+                        self.force.hd = delay
+                else:
+                    assert len(delay)==2, 'Incorrect input delay'
+                    self.cmt.hd   = delay[0]
+                    self.force.hd = delay[1]
         else:
             if isinstance(stf,float) or isinstance(stf,int): # Triangular/Sinusoidal stf
                 triangular_stf = True
@@ -818,11 +820,11 @@ class cmtproblem(object):
                     self.force.hd    = float(stf)
                     triangular_stf = False
                     sinusoidal_stf = True
-			elif len(stf) == 2: # half-durations for both force and cmt parameters
-            	triangular_stf = True
-            	sinusoidal_stf = True
-            	self.cmt.hd    = float(stf[0])
-            	self.force.hd  = float(stf[1])
+            elif len(stf) == 2: # half-durations for both force and cmt parameters
+                triangular_stf = True
+                sinusoidal_stf = True
+                self.cmt.hd    = float(stf[0])
+                self.force.hd  = float(stf[1])
              
         # Loop over channel ids
         for chan_id in chan_ids:
@@ -834,14 +836,14 @@ class cmtproblem(object):
                 read_GF = True
 
             # Loop over moment-tensor/force components
-			nms = []
-			if self.cmt_flag:
-            	nms += self.cmt.MTnm
+            nms = []
+            if self.cmt_flag:
+                nms += self.cmt.MTnm
             if self.force_flag:
                 nms += self.force.Fnm
             for m in nms:
                 
-				# Read Green's functions
+                # Read Green's functions
                 if read_GF: # Read GF sac file
                     gf_sac.read(GF_names[chan_id][m])
                 else:       # Get GF from the self.gf dictionary
@@ -1039,12 +1041,12 @@ class cmtproblem(object):
             self.synt[chan_id].depvar *= 0.
 
             # Loop over moment tensor components 
-			if self.cmt_flag:
+            if self.cmt_flag:
                 for m in range(6):
                     MTnm=self.cmt.MTnm[m]
                     self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
-				
-			# Loop over force components
+                
+            # Loop over force components
             if self.force_flag:
                 for m in range(3):
                     Fnm=self.force.Fnm[m]
@@ -1156,7 +1158,7 @@ class cmtproblem(object):
             eps_p = None
             for it in range(nit):
                 # Update STF
-                g    = fstf + tau * np.conjugate(fsynt)*(fdata-fsynt*fstf)		
+                g    = fstf + tau * np.conjugate(fsynt)*(fdata-fsynt*fstf)      
                 stf  = np.real(np.fft.ifft(g,n=npts_fft))[:npts]
                 stf  = Pplus(stf,t_stf,stf_duration)
                 # Compute predictions
