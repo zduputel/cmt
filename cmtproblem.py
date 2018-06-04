@@ -243,15 +243,29 @@ def parseConfig(cfg_file):
 
 class cmtproblem(object):
 
-    def __init__(self,force_flag=False):
+    def __init__(self,cmt_flag=False,force_flag=False):
         '''
         Constructor
-        Args:
+		Args: 
+			* cmt_flag: if True (default), invert for cmt parameters
             * force_flag: if True, invert for a force (default=False)
+		Remarks:
+		- If cmt_flag and force_flag are True, invert for a complex source including 
+		  cmt and single force parameters (see cmtforceinv). 
+		- If cmt_flag and force_flag are both False, will invert for cmt parameters
+	      only.
         '''
+
+		# Setting cmt_flag and force_flag flags
+        self.force_flag = force_flag
+		if cmt_flag is False and force_flag is False:
+			self.cmt_flag = True
+		else:
+			self.cmt_flag   = cmt_flag
 
         # List of channel ids
         self.chan_ids = []
+
         # Data and Green's functions
         self.data = None  # data dictionary
         self.synt = None  # synthetic dictionary
@@ -260,16 +274,19 @@ class cmtproblem(object):
         self.G = None     # Green's function matrix
         self.delta = None # Data sampling step
         self.twin = {}    # Time-window dictionary
+
         # RMS misfit
         self.global_rms = None # Global RMS misfit
         self.rms  = None       # RMS misfit per station
-        # CMT object
+
+        # CMT/FORCE objects
         self.cmt = cmt()
-        self.force_flag = force_flag
         if self.force_flag:
             self.force = force()
+
         # Deconvolution
         self.duration    = None
+
         # Tapering
         self.taper       = False # Taper flag
         self.taper_n     = None  # Taper width 
@@ -291,6 +308,8 @@ class cmtproblem(object):
 
         assert self.D is not None, 'D must be assigned before cmtinv'
         assert self.G is not None, 'G must be assigned before cmtinv'
+        assert self.cmt_flag is True, 'cmtproblem not properly initialized (self.cmt_flag != True)'
+        assert self.G.shape[1] == 6, 'cmtproblem not properly initialized for cmtinv (%d collumns in self.G)'%(self.G.shape[1])
 
         # Constraints
         if MT is not None: # Fixing the focal mechanism (only invert M0)
@@ -340,7 +359,7 @@ class cmtproblem(object):
 
     def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4):
         '''
-        Perform CMTinversion (stored in cmtproblem.cmt.MT)
+        Perform inversion for a single force (stored in cmtproblem.cmt.force)
         Args:
             * vertical_force: if True impose a pure vertical force
             * F: optional, constrain the force orientation (only invert M0)
@@ -352,8 +371,9 @@ class cmtproblem(object):
         assert self.D is not None, 'D must be assigned before forceinv'
         assert self.G is not None, 'G must be assigned before forceinv'
         assert self.force_flag is True, 'cmtproblem not properly initialized (self.force_flag != True)'
+        assert self.G.shape[1] == 6, 'cmtproblem not properly initialized for single force (%d collumns in self.G)'%(self.G.shape[1])
 
-        # Compute GtG
+        # Get the Green's functions
         if vertical_force:
             G = self.G[:,-1]
         elif F is not None:
@@ -378,7 +398,7 @@ class cmtproblem(object):
         # Scale force vector
         m *= scale
         
-        # Populate cmt attributes
+        # Populate force attributes
         if vertical_force:
             self.force.F = np.zeros((3,))
             self.force.F[-1] = m.copy()
@@ -386,6 +406,83 @@ class cmtproblem(object):
             self.force.F = m * F.copy()
         else:
             self.force.F = m.copy()
+
+        # All done
+        return
+
+    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4):
+        '''
+        Perform inversion for both CMT and single force paramerters (stored in cmtproblem.cmt.MT and cmtproblem.cmt.force)
+        Args:
+            * zero_trace: if True impose zero trace
+            * MT: optional, constrain the focal mechanism (only invert M0)
+            * scale: M0 scale
+            * rcond: Cut-off ratio  small singular values (default: 1e-4)
+        '''
+
+        assert self.D is not None, 'D must be assigned before cmtinv'
+        assert self.G is not None, 'G must be assigned before cmtinv'
+        assert self.G.shape[1] == 9, 'cmtproblem not properly initialized for cmtforceinv (%d collumns in self.G)'%(self.G.shape[1])
+
+        # Get Green's functions for CMT parameters
+        if MT is not None: # Fixing the focal mechanism (only invert M0)
+            Gcmt = (self.G[:,6].dot(MT)).reshape(self.D.size,1)
+        elif zero_trace: # Zero trace
+            Gcmt = np.empty((self.D.size,5))
+            for i in range(2):
+                Gcmt[:,i] = self.G[:,i] - self.G[:,2]
+            for i in range(3):
+                Gcmt[:,i+2] = self.G[:,i+3]
+        else:
+            Gcmt = self.G.copy()
+
+        # Get the Green's functions for a single force
+        if vertical_force:
+            Gforce = (self.G[:,-1]).reshape(self.D.size,1)
+        elif F is not None:
+            Gforce = (self.G[:,6:].dot(F)).reshape(self.D.size,1)
+        else:
+            Gforce = self.G[:,6:].copy()
+
+		# Building the G matrix	
+		G = np.append(Gcmt,Gforce,axis=1)
+		
+        # Moment tensor inversion
+        m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+
+        # Fill-out the global RMS attribute
+        S  = G.dot(m)
+        res = self.D - S
+        res = np.sqrt(res.dot(res)/res.size)
+        nD  = np.sqrt(self.D.dot(self.D)/self.D.size)
+        nS  = np.sqrt(S.dot(S)/S.size)
+        self.global_rms = [res,nD,nS]
+        
+        # Scale moment tensor
+        m *= scale
+
+        # Populate cmt attributes
+        self.cmt.MT = np.zeros((6,))
+        if MT is not None:
+            self.cmt.MT = m * MT.copy()
+        elif zero_trace:
+            self.cmt.MT[5] = m[4]
+            self.cmt.MT[4] = m[3]
+            self.cmt.MT[3] = m[2]
+            self.cmt.MT[0] = m[0]
+            self.cmt.MT[1] = m[1]
+            self.cmt.MT[2] = -m[0] -m[1]
+        else:
+            self.cmt.MT = m[:6].copy()
+
+        # Populate force attributes
+        if vertical_force:
+            self.force.F = np.zeros((3,))
+            self.force.F[-1] = m[-1]
+        elif F is not None:
+            self.force.F = m * F.copy()
+        else:
+            self.force.F = m[:6:].copy()
 
         # All done
         return
@@ -407,18 +504,25 @@ class cmtproblem(object):
         '''
         Build G matrices from data dictionary
         '''
-        
-        self.G = []
+
+		# Initialize G matrix
+		self.G = []
+		
+		# CMT parameters
+		if self.cmt_flag:
+            for mt in self.cmt.MTnm:
+                self.G.append([])
+                for chan_id in self.chan_ids:
+                    self.G[-1].extend(self.gf[chan_id][mt].depvar)
+		
+		# FORCE parameters
         if self.force_flag:
             for f in self.force.Fnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
                     self.G[-1].extend(self.gf[chan_id][f].depvar)
-        else:
-            for mt in self.cmt.MTnm:
-                self.G.append([])
-                for chan_id in self.chan_ids:
-                    self.G[-1].extend(self.gf[chan_id][mt].depvar)
+
+		# Final touch
         self.G = np.array(self.G).T
         
         # All done
@@ -634,11 +738,14 @@ class cmtproblem(object):
                     - channel_id1 is the channel id in the sacpy format "knetwk_kstnm_khole_kcmpnm"
                     -  indicates the moment tensor component (i.e., 'rr', 'tt', 'pp', 'rt', 'rp', 'tp')
             * stf : moment rate function (optionnal, default=None)
-                - can be a scalar giving a triangular STF half-duration
+                - can be a scalar giving a triangular (cmt) or sinusoidal (force) STF half-duration
+				- can be a list or array of len==2 with triangular and sinusoidal hald-furation when 
+				  inverting for both cmt and force parameters
                 - can be a single array used for all stations
                 - can be a dictionary with one stf per channel id (apparent STFs)
             * delay: time-shift (in sec, optional)
                 - can be a single value used for all stations
+				- can be a list or array of len==2 when inverting for both force and cmt parameters
                 - can be a dictionary with one delay per channel id
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
@@ -668,49 +775,73 @@ class cmtproblem(object):
         triangular_stf = False
         sinusoidal_stf = False
         if not isinstance(delay,dict): # Not a delay dictionary
-            self.cmt.ts = delay
-            if self.force_flag:
-                self.force.ts = delay
+			if len(delay)>1:
+				assert self.cmt_flag is True and self.force_flag is True, 'Incorrect delay in preparekernels'
+            	self.cmt.ts = delay[0]
+				self.force.ts = delay[1]
+			else:
+            	self.cmt.ts = delay
+            	if self.force_flag:
+                	self.force.ts = delay
             if stf is not None:
-                if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
+                if isinstance(stf,float) or isinstance(stf,int): # Triangular stf (cmt) or sinusoidal (force)
                     triangular_stf = True
                     self.cmt.hd    = float(stf)
                     if self.force_flag:
                         self.force.hd = float(stf)
                         triangular_stf = False
                         sinusoidal_stf = True
-                else:
+				elif len(stf) == 2: # half-durations for both force and cmt parameters
+					assert self.cmt_flag is True and self.force_flag is True, 'Incorrect stf in preparekernels'
+					triangular_stf = True
+					sinusoidal_stf = True
+					self.cmt.hd    = float(stf[0])
+					self.force.hd  = float(stf[1])
+                else:               # half duration is half the len of stf
                     self.cmt.hd = (len(stf)-1)*0.5
                     if self.force_flag:
                         self.force.hd = (len(stf)-1)*0.5
                         
             else:
-                self.cmt.hd = delay
-                if self.force_flag:
-                    self.force.hd = delay
+				if len(delay)>1:   
+					self.cmt.hd   = delay[0]
+					self.force.hd = delay[1]
+				else:	
+                	self.cmt.hd = delay
+                	if self.force_flag:
+                    	self.force.hd = delay
         else:
-            if isinstance(stf,float) or isinstance(stf,int): # Triangular stf
+            if isinstance(stf,float) or isinstance(stf,int): # Triangular/Sinusoidal stf
                 triangular_stf = True
                 self.cmt.hd    = float(stf)
                 if self.force_flag:
                     self.force.hd    = float(stf)
                     triangular_stf = False
                     sinusoidal_stf = True
+			elif len(stf) == 2: # half-durations for both force and cmt parameters
+            	triangular_stf = True
+            	sinusoidal_stf = True
+            	self.cmt.hd    = float(stf[0])
+            	self.force.hd  = float(stf[1])
              
         # Loop over channel ids
         for chan_id in chan_ids:
+
             read_GF = False
             if chan_id not in self.gf or read_from_file:
                 self.gf[chan_id] = {}
                 assert chan_id in GF_names, 'missing channel id (%s)'%(chan_id)
                 read_GF = True
-             
+
             # Loop over moment-tensor/force components
-            nms = self.cmt.MTnm
+			nms = []
+			if self.cmt_flag:
+            	nms += self.cmt.MTnm
             if self.force_flag:
-                nms=self.force.Fnm
+                nms += self.force.Fnm
             for m in nms:
                 
+				# Read Green's functions
                 if read_GF: # Read GF sac file
                     gf_sac.read(GF_names[chan_id][m])
                 else:       # Get GF from the self.gf dictionary
@@ -906,15 +1037,19 @@ class cmtproblem(object):
         for chan_id in self.chan_ids:
             self.synt[chan_id] = self.data[chan_id].copy()
             self.synt[chan_id].depvar *= 0.
-            # Loop over moment tensor components
+
+            # Loop over moment tensor components 
+			if self.cmt_flag:
+                for m in range(6):
+                    MTnm=self.cmt.MTnm[m]
+                    self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
+				
+			# Loop over force components
             if self.force_flag:
                 for m in range(3):
                     Fnm=self.force.Fnm[m]
                     self.synt[chan_id].depvar += self.force.F[m]*self.gf[chan_id][Fnm].depvar*scale
-            else:
-                for m in range(6):
-                    MTnm=self.cmt.MTnm[m]
-                    self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
+
             # STF convolution
             if stf is not None:
                 npts_fft = nextpow2(self.synt[chan_id].npts)
@@ -931,6 +1066,7 @@ class cmtproblem(object):
                 #plt.plot(self.synt[chan_id].depvar,'b-')
                 #plt.title('%s %.2f'%(chan_id,self.synt[chan_id].az))
                 #plt.show()
+
             # RMS calculation
             if self.data is not None:
                 res = self.synt[chan_id].depvar - self.data[chan_id].depvar
