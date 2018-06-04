@@ -241,6 +241,8 @@ def parseConfig(cfg_file):
     # All done
     return config
 
+
+# MAIN CLASS
 class cmtproblem(object):
 
     def __init__(self,cmt_flag=False,force_flag=False):
