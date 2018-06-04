@@ -338,11 +338,12 @@ class cmtproblem(object):
         # All done
         return
 
-    def forceinv(self,vertical_force=False,scale=1.,rcond=1e-4):
+    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
             * vertical_force: if True impose a pure vertical force
+            * F: optional, constrain the force orientation (only invert M0)
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
         '''
@@ -355,11 +356,13 @@ class cmtproblem(object):
         # Compute GtG
         if vertical_force:
             G = self.G[:,-1]
+        elif F is not None:
+            G = self.G.dot(F)
         else:
             G = self.G
         
         # Inversion
-        if vertical_force:
+        if vertical_force or (F is not None):
             m = (G.T.dot(self.D))/(G.T.dot(G))
         else:
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
@@ -379,6 +382,8 @@ class cmtproblem(object):
         if vertical_force:
             self.force.F = np.zeros((3,))
             self.force.F[-1] = m.copy()
+        elif F is not None:
+            self.force.F = m * F.copy()
         else:
             self.force.F = m.copy()
 
