@@ -844,7 +844,7 @@ class cmtproblem(object):
             if self.force_flag:
                 nms += self.force.Fnm
             for m in nms:
-                
+
                 # Read Green's functions
                 if read_GF: # Read GF sac file
                     gf_sac.read(GF_names[chan_id][m])
@@ -891,8 +891,15 @@ class cmtproblem(object):
                 if isinstance(delay,dict):
                     assert chan_id in delay, 'No channel id %s in delay'%(chan_id)
                     gf_sac.b += delay[chan_id]                    
-                else:
+                elif isinstance(delay,float) or isinstance(delay,int):
                     gf_sac.b += delay
+                else:
+                    assert len(delay)==2, 'Incorrect input delay'
+                    assert (m in self.cmt.MTnm) or (m in self.force.Fnm), 'Incorrect MT/FORCE component'
+                    if m in self.cmt.MTnm:
+                        gf_sac.b += delay[0]
+                    else:
+                        gf_sac.b += delay[1]
 
                 # Filter
                 if filter_freq is not None:
