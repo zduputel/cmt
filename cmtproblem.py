@@ -202,6 +202,13 @@ def ts_hd_misfit(inputs):
     else:
         return i,j,ts_search,hd,rms,rmsn
 
+def warningconditioning(rank,eigvals,cond_threshold):
+    out = sys.stderr
+    out.write("### Warning: ill-conditioned matrix ###\n")
+    out.write("Condition number: %e\n"%(eigvals[0]/eigvals[-1]))
+    out.write("Condition threshold: %e\n"%(cond_threshold))
+    out.write("(%d eigvals out of %d)\n"%(rank,len(eigvals)))
+    out.write("#######################################\n")
 
 class parseConfigError(Exception):
     """
@@ -330,6 +337,8 @@ class cmtproblem(object):
             m = (G.T.dot(self.D))/(G.T.dot(G))
         else:
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+            if rank < G.shape[1]:
+                warningconditioning(rank,s,1./rcond)
 
         # Fill-out the global RMS attribute
         S  = G.dot(m)
@@ -388,6 +397,8 @@ class cmtproblem(object):
             m = (G.T.dot(self.D))/(G.T.dot(G))
         else:
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+            if rank < G.shape[1]:
+                warningconditioning(rank,s,1./rcond)
     
         # Fill-out global rms values
         S  = G.dot(m)
@@ -436,7 +447,7 @@ class cmtproblem(object):
             for i in range(3):
                 Gcmt[:,i+2] = self.G[:,i+3]
         else:
-            Gcmt = self.G.copy()
+            Gcmt = self.G[:,:6].copy()
 
         # Get the Green's functions for a single force
         if vertical_force:
@@ -451,6 +462,8 @@ class cmtproblem(object):
         
         # Moment tensor inversion
         m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+        if rank < G.shape[1]:
+            warningconditioning(rank,s,1./rcond)
 
         # Fill-out the global RMS attribute
         S  = G.dot(m)
