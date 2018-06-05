@@ -305,7 +305,7 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4):
+    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4,get_Cm=False):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
@@ -339,7 +339,7 @@ class cmtproblem(object):
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
             if rank < G.shape[1]:
                 warningconditioning(rank,s,1./rcond)
-
+        
         # Fill-out the global RMS attribute
         S  = G.dot(m)
         res = self.D - S
@@ -365,10 +365,14 @@ class cmtproblem(object):
         else:
             self.cmt.MT = m.copy()
 
+        # Return the posterior covariance matrix
+        if get_Cm:
+            return np.linalg.inv(G.T.dot(G))
+
         # All done
         return
 
-    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4):
+    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False):
         '''
         Perform inversion for a single force (stored in cmtproblem.cmt.force)
         Args:
@@ -420,10 +424,14 @@ class cmtproblem(object):
         else:
             self.force.F = m.copy()
 
+        # Return the posterior covariance matrix
+        if get_Cm:
+            return np.linalg.inv(G.T.dot(G))
+
         # All done
         return
 
-    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4):
+    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False):
         '''
         Perform inversion for both CMT and single force paramerters (stored in cmtproblem.cmt.MT and cmtproblem.cmt.force)
         Args:
@@ -498,6 +506,10 @@ class cmtproblem(object):
             self.force.F = m * F.copy()
         else:
             self.force.F = m[:6:].copy()
+
+        # Return the posterior covariance matrix
+        if get_Cm:
+            return np.linalg.inv(G.T.dot(G))
 
         # All done
         return
@@ -886,12 +898,11 @@ class cmtproblem(object):
                  
                 # Convolve with STF(s)
                 if stf is not None:
-                        
-                    if triangular_stf: # Convolve with a triangular stf
+                    if m in self.cmt.MTnm and triangular_stf: # Convolve with a triangular stf
                         gf_sac = conv_by_tri_stf(gf_sac,0.,self.cmt.hd)
 
-                    elif sinusoidal_stf:
-                        gf_sac = conv_by_sin_stf(gf_sac,0.,self.cmt.hd)
+                    elif m in self.force.Fnm and sinusoidal_stf:
+                        gf_sac = conv_by_sin_stf(gf_sac,0.,self.force.hd)
                             
                     elif isinstance(stf,np.ndarray) or isinstance(stf,list): 
                         gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='same')
