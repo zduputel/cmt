@@ -210,6 +210,54 @@ def warningconditioning(rank,eigvals,cond_threshold):
     out.write("(%d eigvals out of %d)\n"%(rank,len(eigvals)))
     out.write("#######################################\n")
 
+def getICDG(G):
+    '''
+    Decomposition using Kawakatsu (1996) decomposition for diagonal elements
+    Args:
+        * G matrix (columns ordered as Mrr, Mtt, Mpp, Mrt, Mrp, Mtp)
+    Returns:
+        * G matrix with diagonal elements reordered as I (isotropic)
+          C (CLVD) and D (difference)
+    '''
+    GICD = np.zeros_like(G)
+    GICD[:,0] = 1./3. * (G[:,0] + G[:,1] + G[:,2])    # Isotropic
+    GICD[:,1] = 1./3. * (G[:,1] + G[:,2] - 2.*G[:,0]) # CLVD
+    GICD[:,2] = 1./2. * (G[:,1] - G[:,2])             # Difference
+    GICD[:,3] = G[:,3]
+    GICD[:,4] = G[:,4]
+    GICD[:,5] = G[:,5]
+    # All done
+    return GICD
+
+def getMTfromICD(MICD):
+    '''
+    Recombine ICD inverted moment tensor components into standard
+    Mrr, Mtt, Mpp, Mrt, Mrp, Mtp components
+    '''
+    MT = np.zeros_like(MICD)
+    MT[0] = MICD[0] - MICD[1] # Isotropic - CLVD
+    MT[1] = MICD[0]+0.5*MICD[1]+MICD[2]
+    MT[2] = MT[1]-2*MICD[2]
+    MT[3] = MICD[3]
+    MT[4] = MICD[4]
+    MT[5] = MICD[5]
+    # All done
+    return MT
+
+def getICDfromMT(MT):
+    '''
+    Get ICD moment tensor for standard Mrr, Mtt, Mpp, Mrt, Mrp, Mtp components
+    '''
+    MICD = np.zeros_like(MT)
+    MICD[0] = 1./3. * (MT[0] + MT[1] + MT[2])    # Isotropic
+    MICD[1] = 1./3. * (MT[1] + MT[2] - 2.*MT[0]) # CLVD
+    MICD[2] = 1./2. * (MT[1] - MT[2])             # Difference
+    MICD[3] = MT[3]
+    MICD[4] = MT[4]
+    MICD[5] = MT[5]
+    # All done
+    return MICD
+
 class parseConfigError(Exception):
     """
     Raised if the config file is incorrect
@@ -305,7 +353,7 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4,get_Cm=False):
+    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
@@ -313,6 +361,9 @@ class cmtproblem(object):
             * MT: optional, constrain the focal mechanism (only invert M0)
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
+            * ICD: recombine MT components into I, C, D, Mrt, Mrp and Mtp
+            * get_Cm: if True, return the posterior covariance matrix
+            * get_BIC: if True, return the Bayesian information criterion
         '''
 
         assert self.D is not None, 'D must be assigned before cmtinv'
@@ -325,12 +376,19 @@ class cmtproblem(object):
             G = self.G.dot(MT)
         elif zero_trace: # Zero trace
             G = np.empty((self.D.size,5))
-            for i in range(2):
-                G[:,i] = self.G[:,i] - self.G[:,2]
-            for i in range(3):
-                G[:,i+2] = self.G[:,i+3]
+            if ICD:
+                G = getICDG(self.G)
+                G = G[:,1:]
+            else:
+                for i in range(2):
+                    G[:,i] = self.G[:,i] - self.G[:,2]
+                for i in range(3):
+                    G[:,i+2] = self.G[:,i+3]
         else:
-            G = self.G
+            if ICD:
+                G = getICDG(self.G)
+            else: 
+                G = self.G
 
         # Moment tensor inversion
         if MT is not None:
@@ -356,23 +414,39 @@ class cmtproblem(object):
         if MT is not None:
             self.cmt.MT = m * MT.copy()
         elif zero_trace:
-            self.cmt.MT[5] = m[4]
-            self.cmt.MT[4] = m[3]
-            self.cmt.MT[3] = m[2]
-            self.cmt.MT[0] = m[0]
-            self.cmt.MT[1] = m[1]
-            self.cmt.MT[2] = -m[0] -m[1]
+            if ICD:
+                MICD = np.zeros((6,))
+                MICD[1:] = m[:]
+                self.cmt.MT = getMTfromICD(MICD)
+            else:
+                self.cmt.MT[5] = m[4]
+                self.cmt.MT[4] = m[3]
+                self.cmt.MT[3] = m[2]
+                self.cmt.MT[0] = m[0]
+                self.cmt.MT[1] = m[1]
+                self.cmt.MT[2] = -m[0] -m[1]
         else:
-            self.cmt.MT = m.copy()
+            if ICD:
+                self.cmt.MT = getMTfromICD(m)
+            else:
+                self.cmt.MT = m.copy()
 
-        # Return the posterior covariance matrix
+        # Return the posterior covariance matrix and BIC
+        out = None
         if get_Cm:
-            return np.linalg.inv(G.T.dot(G))
+            out = np.linalg.inv(G.T.dot(G))
+        if get_BIC:
+            BIC = self.getBIC(G,m)
+            if out is None:
+                return BIC
+            else:
+                out = [out,BIC]
 
         # All done
-        return
+        return out
 
-    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False):
+
+    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False):
         '''
         Perform inversion for a single force (stored in cmtproblem.cmt.force)
         Args:
@@ -380,6 +454,8 @@ class cmtproblem(object):
             * F: optional, constrain the force orientation (only invert M0)
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
+            * get_Cm: if True, return the posterior covariance matrix
+            * get_BIC: if True, return the Bayesian information criterion
         '''
 
         # Check things before doing inversion
@@ -424,14 +500,22 @@ class cmtproblem(object):
         else:
             self.force.F = m.copy()
 
-        # Return the posterior covariance matrix
+        # Return the posterior covariance matrix and BIC
+        out = None
         if get_Cm:
-            return np.linalg.inv(G.T.dot(G))
+            out = np.linalg.inv(G.T.dot(G))
+        if get_BIC:
+            BIC = self.getBIC(G,m)
+            if out is None:
+                return BIC
+            else:
+                out = [out,BIC]
 
         # All done
-        return
+        return out
 
-    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False):
+
+    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False):
         '''
         Perform inversion for both CMT and single force paramerters (stored in cmtproblem.cmt.MT and cmtproblem.cmt.force)
         Args:
@@ -439,6 +523,8 @@ class cmtproblem(object):
             * MT: optional, constrain the focal mechanism (only invert M0)
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
+            * get_Cm: if True, return the posterior covariance matrix
+            * get_BIC: if True, return the Bayesian information criterion
         '''
 
         assert self.D is not None, 'D must be assigned before cmtinv'
@@ -447,7 +533,7 @@ class cmtproblem(object):
 
         # Get Green's functions for CMT parameters
         if MT is not None: # Fixing the focal mechanism (only invert M0)
-            Gcmt = (self.G[:,6].dot(MT)).reshape(self.D.size,1)
+            Gcmt = (self.G[:,:6].dot(MT)).reshape(self.D.size,1)
         elif zero_trace: # Zero trace
             Gcmt = np.empty((self.D.size,5))
             for i in range(2):
@@ -487,7 +573,7 @@ class cmtproblem(object):
         # Populate cmt attributes
         self.cmt.MT = np.zeros((6,))
         if MT is not None:
-            self.cmt.MT = m * MT.copy()
+            self.cmt.MT = m[0] * MT.copy()
         elif zero_trace:
             self.cmt.MT[5] = m[4]
             self.cmt.MT[4] = m[3]
@@ -503,16 +589,56 @@ class cmtproblem(object):
             self.force.F = np.zeros((3,))
             self.force.F[-1] = m[-1]
         elif F is not None:
-            self.force.F = m * F.copy()
+            self.force.F = m[-1] * F.copy()
         else:
             self.force.F = m[:6:].copy()
 
         # Return the posterior covariance matrix
+        out = None
         if get_Cm:
-            return np.linalg.inv(G.T.dot(G))
+            out = np.linalg.inv(G.T.dot(G))
+        if get_BIC:
+            BIC = self.getBIC(G,m)
+            if out is None:
+                return BIC
+            else:
+                out = [out,BIC]
 
         # All done
-        return
+        return out
+
+    def getBIC(self,G,m,Cd=None):
+        '''
+        Get the Bayesian Information Criterion (e.g., Bishop, 2006)
+        (assuming a broad prior)
+        Args:
+            * G: Green's function matrix
+            * m: model vector (MAP)
+            * Cd: data covariance matrix
+        '''
+        
+        # Check the inputs
+        assert self.D is not None, 'self.D should exist before using getBIC'
+        d = self.D
+        assert d.size == G.shape[0], 'incorrect Green function or data size'
+        assert m.size == G.shape[1], 'incorrect Green function or model size'
+        N = float(d.size)
+        M = float(m.size)
+        if Cd is None:
+            Cdi = np.eye(d.size)
+            Cd_det = 1.
+        else:
+            assert Cd.shape[0] == s.size, 'Incorrect size for Cd'
+            Cdi = np.linalg.inv(Cd)
+            Cd_det = np.linalg.det(Cd)
+        
+        # Log-likelihood 
+        llk = 0.5 * (d - G.dot(m)).T.dot(Cdi).dot(d - G.dot(m)) 
+        llk -= 0.5*N*np.log(2.*np.pi) + 0.5*np.log(Cd_det)
+        BIC = llk - 0.5*M*np.log(N)
+
+        # All done
+        return BIC
         
     def buildD(self):
         '''
