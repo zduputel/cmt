@@ -434,8 +434,15 @@ class cmtproblem(object):
         # Return the posterior covariance matrix and BIC
         out = None
         if get_Cm:
-            out = np.linalg.inv(G.T.dot(G))
+            if MT is not None:
+                out = np.array([1./G.T.dot(G)])
+            else:
+                out = np.linalg.inv(G.T.dot(G))
         if get_BIC:
+            if vertical_force or (F is not None):
+                BIC = self.getBIC(G.reshape(self.D.size,1),np.array([m]))
+            else:
+                BIC = self.getBIC(G,m)
             BIC = self.getBIC(G,m)
             if out is None:
                 return BIC
@@ -503,9 +510,15 @@ class cmtproblem(object):
         # Return the posterior covariance matrix and BIC
         out = None
         if get_Cm:
-            out = np.linalg.inv(G.T.dot(G))
+            if vertical_force or (F is not None):
+                out = np.array([1./G.T.dot(G)])
+            else:
+                out = np.linalg.inv(G.T.dot(G))
         if get_BIC:
-            BIC = self.getBIC(G,m)
+            if vertical_force or (F is not None):
+                BIC = self.getBIC(G.reshape(self.D.size,1),np.array([m]))
+            else:
+                BIC = self.getBIC(G,m)
             if out is None:
                 return BIC
             else:
