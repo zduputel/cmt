@@ -6,6 +6,7 @@ Written by Z. Duputel and L. Rivera, May 2015
 
 # Externals
 import numpy as np
+from copy     import deepcopy
 from datetime import datetime
 
 def gamma(az,ta):
@@ -330,4 +331,11 @@ class cmt(object):
         ax.imshow(pol)
         ax.set_axis_off()
         #return x,y,r,amp,pol
+
+    def copy(self):
+        '''
+        Returns a copy of the cmt object
+        '''
+        # All done
+        return deepcopy(self)
 
