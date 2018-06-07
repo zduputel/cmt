@@ -220,9 +220,9 @@ def getICDG(G):
           C (CLVD) and D (difference)
     '''
     GICD = np.zeros_like(G)
-    GICD[:,0] = 1./3. * (G[:,0] + G[:,1] + G[:,2])    # Isotropic
-    GICD[:,1] = 1./3. * (G[:,1] + G[:,2] - 2.*G[:,0]) # CLVD
-    GICD[:,2] = 1./2. * (G[:,1] - G[:,2])             # Difference
+    GICD[:,0] = (G[:,0] + G[:,1] + G[:,2])      # Isotropic
+    GICD[:,1] = -G[:,0] + 0.5*(G[:,1] + G[:,2]) # CLVD
+    GICD[:,2] = (G[:,1] - G[:,2])               # Difference
     GICD[:,3] = G[:,3]
     GICD[:,4] = G[:,4]
     GICD[:,5] = G[:,5]
@@ -329,6 +329,9 @@ class cmtproblem(object):
         self.gf   = None  # Green's functions sac object      
         self.D = None     # Data vector
         self.G = None     # Green's function matrix
+        self.Cd = None    # Data covariance matrix
+        self.W  = None    # Data pre-weighting matrix
+        self.pre_weight = False # By default, there is no pre-weighting
         self.delta = None # Data sampling step
         self.twin = {}    # Time-window dictionary
 
@@ -353,7 +356,7 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False):
+    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False,get_AIC=False):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
@@ -432,28 +435,32 @@ class cmtproblem(object):
                 self.cmt.MT = m.copy()
 
         # Return the posterior covariance matrix and BIC
-        out = None
+        out = []
         if get_Cm:
             if MT is not None:
-                out = np.array([1./G.T.dot(G)])
+                out.append(np.array([1./G.T.dot(G)]))
             else:
-                out = np.linalg.inv(G.T.dot(G))
+                out.append(np.linalg.inv(G.T.dot(G)))
         if get_BIC:
-            if vertical_force or (F is not None):
+            if MT is not None:
                 BIC = self.getBIC(G.reshape(self.D.size,1),np.array([m]))
             else:
                 BIC = self.getBIC(G,m)
-            BIC = self.getBIC(G,m)
-            if out is None:
-                return BIC
+            out.append(BIC)
+        if get_AIC:
+            if MT is not None:
+                AIC = self.getBIC(G.reshape(self.D.size,1),np.array([m]),AIC=True)
             else:
-                out = [out,BIC]
+                AIC = self.getBIC(G,m,AIC=True)
+            out.append(AIC)
 
         # All done
-        return out
+        if len(out)>=1:
+            return out
+        return
 
 
-    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False):
+    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False, get_AIC=False):
         '''
         Perform inversion for a single force (stored in cmtproblem.cmt.force)
         Args:
@@ -508,27 +515,33 @@ class cmtproblem(object):
             self.force.F = m.copy()
 
         # Return the posterior covariance matrix and BIC
-        out = None
+        out = [] 
         if get_Cm:
             if vertical_force or (F is not None):
-                out = np.array([1./G.T.dot(G)])
+                out.append(np.array([1./G.T.dot(G)]))
             else:
-                out = np.linalg.inv(G.T.dot(G))
+                out.append(np.linalg.inv(G.T.dot(G)))
         if get_BIC:
             if vertical_force or (F is not None):
                 BIC = self.getBIC(G.reshape(self.D.size,1),np.array([m]))
             else:
                 BIC = self.getBIC(G,m)
-            if out is None:
-                return BIC
+            out.append(BIC)
+        if get_AIC:
+            if vertical_force or (F is not None):
+                AIC = self.getBIC(G.reshape(self.D.size,1),np.array([m]),AIC=True)
             else:
-                out = [out,BIC]
+                AIC = self.getBIC(G,m,AIC=True)
+            out.append(AIC)
 
         # All done
-        return out
+        if len(out)>=1:
+            return out
+        return
 
 
-    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False):
+    def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,
+                    get_Cm=False,get_BIC=False,get_AIC=False):
         '''
         Perform inversion for both CMT and single force paramerters (stored in cmtproblem.cmt.MT and cmtproblem.cmt.force)
         Args:
@@ -538,6 +551,7 @@ class cmtproblem(object):
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
             * get_Cm: if True, return the posterior covariance matrix
             * get_BIC: if True, return the Bayesian information criterion
+            * get_AIC: if True, return the Bayesian information criterion
         '''
 
         assert self.D is not None, 'D must be assigned before cmtinv'
@@ -607,27 +621,30 @@ class cmtproblem(object):
             self.force.F = m[:6:].copy()
 
         # Return the posterior covariance matrix
-        out = None
+        out = []
         if get_Cm:
-            out = np.linalg.inv(G.T.dot(G))
+            out.append(np.linalg.inv(G.T.dot(G)))
         if get_BIC:
-            BIC = self.getBIC(G,m)
-            if out is None:
-                return BIC
-            else:
-                out = [out,BIC]
+            out.append(BIC = self.getBIC(G,m))
+        if get_AIC:
+            out.append(AIC = self.getBIC(G,m,AIC=True))
 
         # All done
-        return out
+        if len(out)>=1:
+            return out
+        return
 
-    def getBIC(self,G,m,Cd=None):
+
+    def getBIC(self,G,m,Cd=None,AIC=False):
         '''
         Get the Bayesian Information Criterion (e.g., Bishop, 2006)
-        (assuming a broad prior)
+        Notice that we use the definition of Schwarz and Bishop (which
+        is different from what people use usually)
         Args:
             * G: Green's function matrix
             * m: model vector (MAP)
             * Cd: data covariance matrix
+            * AIC: if True return Akaike Information Criterion istead
         '''
         
         # Check the inputs
@@ -638,39 +655,80 @@ class cmtproblem(object):
         N = float(d.size)
         M = float(m.size)
         if Cd is None:
+            #sd = d.max()*0.05 # Sigma_d
+            #sd = np.sqrt(np.sum((d - G.dot(m))**2)/d.size)
+            #Cdi = np.eye(d.size) / (sd * sd)
+            #Norm = 0.5*N*(np.log(2.*np.pi)+np.log(sd*sd))
             Cdi = np.eye(d.size)
-            Cd_det = 1.
+            Norm = 0.5*N*np.log(2.*np.pi)
+            if self.pre_weight: # Adding det(Cd)
+                for chan_id in self.chan_ids:
+                    Norm += 0.5 * self.log_Cd_det[chan_id]
         else:
             assert Cd.shape[0] == s.size, 'Incorrect size for Cd'
             Cdi = np.linalg.inv(Cd)
             Cd_det = np.linalg.det(Cd)
+            Norm = 0.5 * (N*np.log(2.*np.pi)+np.log(Cd_det))
         
         # Log-likelihood 
-        llk = 0.5 * (d - G.dot(m)).T.dot(Cdi).dot(d - G.dot(m)) 
-        llk -= 0.5*N*np.log(2.*np.pi) + 0.5*np.log(Cd_det)
-        BIC = llk - 0.5*M*np.log(N)
+        llk = -0.5 * (d - G.dot(m)).T.dot(Cdi).dot(d - G.dot(m)) 
+        llk -= Norm
 
-        # All done
+        # Get AIC
+        if AIC:
+            AIC = 2*M - 2*llk # !! BIC = -p(D) of Bishop, 2006)
+            return AIC
+
+        # Get BIC
+        BIC = M*np.log(N) - 2*llk # !! BIC = -2*p(D) of Bishop, 2006)
         return BIC
         
-    def buildD(self):
+    def buildD(self,pre_weight=False):
         '''
         Build D matrices from data dictionary
+        if self.Cd exists, will pre-weight D by self.w
         '''
 
+        # Check inputs
+        if pre_weight and not self.pre_weight: # Update self.pre_weight
+            assert self.G is None, 'Inconsistent pre-weighting between G and D'
+            self.pre_weight = True
+
+        if self.pre_weight: # Check that everything is consistent
+            assert self.W is not None, 'Weight matrix self.W not built (use buildCd)'
+            if not pre_weight:
+                sys.stderr.write('Warning: will pre-weight G\n')
+
+        # Build D vector
         self.D = []
         for chan_id in self.chan_ids:
-            self.D.extend(self.data[chan_id].depvar)
+            if self.pre_weight:
+                W = self.W[chan_id]
+                S = self.data[chan_id].depvar
+                self.D.extend(W.dot(S))
+            else:
+                self.D.extend(self.data[chan_id].depvar)
         self.D = np.array(self.D)
 
         # All done
         return
 
-    def buildG(self):
+
+    def buildG(self,pre_weight=False):
         '''
         Build G matrices from data dictionary
         '''
 
+        # Check inputs
+        if pre_weight and not self.pre_weight: # Update self.pre_weight
+            assert self.D is None, 'Inconsistent pre-weighting between G and D'
+            self.pre_weight = True
+
+        if self.pre_weight: # Check that everything is consistent
+            assert self.W is not None, 'Weight matrix self.W not built (use buildCd)'
+            if not pre_weight:
+                sys.stderr.write('Warning: will pre-weight G\n')
+        
         # Initialize G matrix
         self.G = []
         
@@ -679,20 +737,94 @@ class cmtproblem(object):
             for mt in self.cmt.MTnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
-                    self.G[-1].extend(self.gf[chan_id][mt].depvar)
+                    if self.pre_weight:
+                        W = self.W[chan_id]
+                        S = self.gf[chan_id][mt].depvar
+                        self.G[-1].extend(W.dot(S))
+                    else:
+                        self.G[-1].extend(self.gf[chan_id][mt].depvar)
         
         # FORCE parameters
         if self.force_flag:
             for f in self.force.Fnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
-                    self.G[-1].extend(self.gf[chan_id][f].depvar)
+                    if self.pre_weight:
+                        W = self.W[chan_id]
+                        S = self.gf[chan_id][f].depvar
+                        self.G[-1].extend(W.dot(S))
+                    else:
+                        self.G[-1].extend(self.gf[chan_id][f].depvar)
 
         # Final touch
         self.G = np.array(self.G).T
         
         # All done
         return
+
+
+    def buildCd(self,sigma_d=None,noise_level=None,tcor=None):
+        '''
+        Build Data covariance a pre-weighting matrix 
+        Args:
+            * sigma_d: float or dict[chan_id]
+            * noise_level: noise level (fraction of max amplitudes)
+            * tcor: correlation length
+        '''
+        
+        # Check inputs
+        assert sigma_d is not None or noise_level is not None, 'Error sigma_d or noise_level must be specified'
+        if sigma_d is not None:
+            assert noise_level is None, 'sigma_d OR noise_level must be specified'
+
+        # Get total data length
+        if self.D is not None:
+            N = self.D.size
+        else:
+            N = 0
+            for chan_id in self.chan_ids:
+                N += self.data[chan_id].npts
+
+        # Correlation function
+        t = (np.arange(2*N-1)-N+1).astype('float64')
+        if tcor is not None:
+            corE = np.exp(-np.abs(t)/tcor)
+        
+        # Build Cd
+        self.Cd = {} # Data covariances
+        self.W  = {} # Pre-weight matrices
+        self.log_Cd_det = {} # Log-Determinants of Cd 
+        for chan_id in self.chan_ids:
+            # Standard deviation
+            if sigma_d is not None:
+                if isinstance(sigma_d,dict):
+                    sd = sigma_d[chan_id]
+                else:
+                    sd = sigma_d
+            else:
+                sd = np.abs(self.data[chan_id].depvar).max()*noise_level
+
+            # Build Cd for this channel
+            npts = self.data[chan_id].npts
+            if tcor:
+                self.Cd[chan_id] = np.zeros((npts,npts))
+                for i in range(npts):
+                    for j in range(npts):
+                        dk = i-j
+                        self.Cd[chan_id][i,j] = corE[N+dk-1]*sd*sd
+                iCd = np.linalg.inv(self.Cd[chan_id])
+            else:
+                self.Cd[chan_id] = np.eye(npts)*sd*sd
+                iCd = np.eye(npts)*1./(sd*sd)
+
+            # Define log of det(Cd)
+            self.log_Cd_det[chan_id] = 2.*npts*np.log(sd)
+
+            # Define a preweight matrix
+            self.W[chan_id] = np.linalg.cholesky(iCd).T
+
+        # All done
+        return 
         
     def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',wpwin=False,
                     swwin=None,dcwin={},taper_width=None,derivate=False,o_dir=None,o_sac_lst=None):
