@@ -356,7 +356,7 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False,get_AIC=False):
+    def cmtinv(self,zero_trace=True,constrainIC=False,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False,get_AIC=False):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
@@ -387,12 +387,18 @@ class cmtproblem(object):
                     G[:,i] = self.G[:,i] - self.G[:,2]
                 for i in range(3):
                     G[:,i+2] = self.G[:,i+3]
+        elif constrainIC:
+            assert ICD, 'ICD must be true when constrainIC==True'
+            Gicd = getICDG(self.G)
+            G = Gicd[:,:2].copy()
         else:
             if ICD:
                 G = getICDG(self.G)
             else: 
                 G = self.G
 
+
+        
         # Moment tensor inversion
         if MT is not None:
             m = (G.T.dot(self.D))/(G.T.dot(G))
@@ -419,7 +425,7 @@ class cmtproblem(object):
         elif zero_trace:
             if ICD:
                 MICD = np.zeros((6,))
-                MICD[1:] = m[:]
+                MICD[1:] = m[:].copy()
                 self.cmt.MT = getMTfromICD(MICD)
             else:
                 self.cmt.MT[5] = m[4]
@@ -428,6 +434,10 @@ class cmtproblem(object):
                 self.cmt.MT[0] = m[0]
                 self.cmt.MT[1] = m[1]
                 self.cmt.MT[2] = -m[0] -m[1]
+        elif constrainIC:
+            MICD = np.zeros((6,))
+            MICD[:2] = m[:].copy()
+            self.cmt.MT = getMTfromICD(MICD)
         else:
             if ICD:
                 self.cmt.MT = getMTfromICD(m)
@@ -455,7 +465,9 @@ class cmtproblem(object):
             out.append(AIC)
 
         # All done
-        if len(out)>=1:
+        if len(out)==1:
+            return out[0]
+        if len(out)>1:
             return out
         return
 
@@ -535,7 +547,9 @@ class cmtproblem(object):
             out.append(AIC)
 
         # All done
-        if len(out)>=1:
+        if len(out)==1:
+            return out[0]
+        if len(out)>1:
             return out
         return
 
@@ -624,13 +638,18 @@ class cmtproblem(object):
         out = []
         if get_Cm:
             out.append(np.linalg.inv(G.T.dot(G)))
+        print(len(m))
         if get_BIC:
-            out.append(BIC = self.getBIC(G,m))
+            BIC = self.getBIC(G,m)
+            out.append(BIC)
         if get_AIC:
-            out.append(AIC = self.getBIC(G,m,AIC=True))
+            AIC = self.getBIC(G,m,AIC=True)
+            out.append(AIC)
 
         # All done
-        if len(out)>=1:
+        if len(out)==1:
+            return out[0]
+        if len(out)>1:
             return out
         return
 
@@ -938,8 +957,13 @@ class cmtproblem(object):
 
             if chan_id in dcwin:                
                 if wpwin:
-                    tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
-                    tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                    if dcwin[chan_id] is not None:
+                        tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
+                        tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                    else:
+                        sys.stderr.write('Warning: No data windowing for %s\n'%(chan_id))
+                        tbeg = data_sac.b - data_sac.o
+                        tend = data_sac.e - data_sac.o
                 else:
                     tbeg = dcwin[chan_id][0] 
                     tend = dcwin[chan_id][1] 
@@ -1012,8 +1036,13 @@ class cmtproblem(object):
             # Time-window defined for individual channels
             if chan_id in dcwin:                
                 if wpwin:
-                    tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
-                    tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                    if dcwin[chan_id] is not None:
+                        tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
+                        tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                    else:
+                        sys.stderr.write('Warning: No data windowing for %s\n'%(chan_id))
+                        tbeg = data_sac.b - data_sac.o
+                        tend = data_sac.e - data_sac.o
                 else:
                     tbeg = dcwin[chan_id][0] 
                     tend = dcwin[chan_id][1] 
@@ -1046,6 +1075,8 @@ class cmtproblem(object):
                 - can be a list or array of len==2 when inverting for both force and cmt parameters
                 - can be a dictionary with one delay per channel id
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
+                                      can also be a dictionary with channel ids and a 'default' key
+                                      to use different passband for different channels
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
             * baseline : number of samples to remove baseline (default: no baseline)
@@ -1198,7 +1229,15 @@ class cmtproblem(object):
 
                 # Filter
                 if filter_freq is not None:
-                    gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
+                    if isinstance(filter_freq,np.ndarray) or isinstance(filter_freq,list):
+                        gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
+                    else:
+                        assert isinstance(filter_freq,dict), 'Incorrect format for filter_freq'
+                        if chan_id in filter_freq:
+                            freqs = filter_freq[chan_id]
+                        else:
+                            freqs = filter_freq['default']
+                        gf_sac.filter(freq=freqs,order=filter_order,btype=filter_btype)
 
                 if derivate:
                     gf_sac.derivate()            
@@ -1510,6 +1549,17 @@ class cmtproblem(object):
                variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1):
         '''
         Plot data / synt traces
+        Args:
+            * length: float or dictionary for xlim
+            * i_sac_lst: filename of list of sac files 
+            * show_win: if True, will show the time-window used for inversion
+            * swwin/wpwin: windowing parameters see preparekernels
+            * t0delay: pre-event delay for xlim
+            * variable_xlim: if true, will adapt the time-window arround swwin/wpwiin
+            * rasterize: rasterize output figure
+            * staloc: station locations as an array of [stla,stlo,az,dist]
+            * ofile: pdf file name
+            * yfactor: for ylim
         '''
 
         import matplotlib
@@ -1582,7 +1632,14 @@ class cmtproblem(object):
             t0 = t1[0] - t0delay
             if t0<0.:
                 t0 = 0.
-            plt.xlim([t0,t0+length])
+            if isinstance(length,dict):
+                if chan_id in length:
+                    tmax = length[chan_id]
+                else:
+                    tmax = length['default']
+            else:
+                tmax = length
+            plt.xlim([t0,t0+tmax])
             a    = np.absolute(sacdata.depvar).max()*1000.
             ymin = -yfactor*a
             ymax =  yfactor*a
@@ -1620,7 +1677,7 @@ class cmtproblem(object):
                 ymin = -yfactor*a
                 ymax =  yfactor*a                
                 if variable_xlim:
-                    plt.xlim([tbeg - t0delay,tend+length])
+                    plt.xlim([tbeg - t0delay,tend+tmax])
             ylims = [ymin,ymax]
             plt.ylim(ylims)                    
             # Annotations
