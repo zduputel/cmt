@@ -852,6 +852,8 @@ class cmtproblem(object):
         Args:
             * i_sac_lst: list of input data sac file 
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
+                                      can also be a dictionary with channel ids and a 'default' key
+                                      to use different passband for different channels
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
             * wpwin: if True, use W-phase window
@@ -920,7 +922,15 @@ class cmtproblem(object):
             
             # Filter
             if filter_freq is not None:
-                data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)
+                if isinstance(filter_freq,np.ndarray) or isinstance(filter_freq,list):
+                    data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
+                else:
+                    assert isinstance(filter_freq,dict), 'Incorrect format for filter_freq'
+                    if chan_id in filter_freq:
+                        freqs = filter_freq[chan_id]
+                    else:
+                        freqs = filter_freq['default']
+                    data_sac.filter(freq=freqs,order=filter_order,btype=filter_btype)
 
             # Differentiate
             if derivate:
@@ -1554,7 +1564,7 @@ class cmtproblem(object):
             * i_sac_lst: filename of list of sac files 
             * show_win: if True, will show the time-window used for inversion
             * swwin/wpwin: windowing parameters see preparekernels
-            * t0delay: pre-event delay for xlim
+            * t0delay: pre-event delay for xlim 
             * variable_xlim: if true, will adapt the time-window arround swwin/wpwiin
             * rasterize: rasterize output figure
             * staloc: station locations as an array of [stla,stlo,az,dist]
@@ -1677,7 +1687,11 @@ class cmtproblem(object):
                 ymin = -yfactor*a
                 ymax =  yfactor*a                
                 if variable_xlim:
-                    plt.xlim([tbeg - t0delay,tend+tmax])
+                    if tbeg - t0delay<0.:
+                        tmin = 0.
+                    else:
+                        tmin = tbeg - t0delay
+                    plt.xlim([tmin,tend+tmax])
             ylims = [ymin,ymax]
             plt.ylim(ylims)                    
             # Annotations
