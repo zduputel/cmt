@@ -1022,7 +1022,15 @@ class cmtproblem(object):
                 assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
                 tbeg = data_sac.t[0]-data_sac.o
                 if swwin is not None:
-                    tend = tbeg + swwin * data_sac.gcarc
+                    if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
+                        tbeg = [tbeg]
+                        tend = []
+                        for i,sw in enumerate(swwin):
+                            if i>0:
+                                tbeg.append(tend[-1])
+                            tend.append(tbeg[0] + sw * data_sac.gcarc)
+                    else:
+                        tend = tbeg + swwin * data_sac.gcarc
                 else:
                     tend = tbeg + 15.0  * data_sac.gcarc
 
@@ -1047,8 +1055,15 @@ class cmtproblem(object):
             if chan_id in dcwin:                
                 if wpwin:
                     if dcwin[chan_id] is not None:
-                        tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
-                        tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                        if len(dcwin[chan_id])==2:
+                            tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
+                            tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                        else:
+                            tbeg = []
+                            tend = []
+                            for i in range(len(dcwin[chan_id])/2):
+                                tbeg.append(dcwin[chan_id][2*i] + data_sac.t[0]-data_sac.o)
+                                tend.append(dcwin[chan_id][2*i+1] + data_sac.t[0]-data_sac.o)
                     else:
                         sys.stderr.write('Warning: No data windowing for %s\n'%(chan_id))
                         tbeg = data_sac.b - data_sac.o
@@ -1659,7 +1674,15 @@ class cmtproblem(object):
                     assert sacdata.gcarc >= 0., 'gcarc must be assigned in sac data header'
                     tbeg = sacdata.t[0] - sacdata.o
                     if swwin is not None:
-                        tend = tbeg + swwin * sacdata.gcarc
+                        if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
+                            tbeg = [tbeg]
+                            tend = []
+                            for i,sw in enumerate(swwin):
+                                if i>1:
+                                    tbeg.append(tend[-1])
+                                tend.append(tbeg + sw * data_sac.gcarc)
+                        else:
+                            tend = tbeg + swwin * data_sac.gcarc
                     else:
                         tend = tbeg + 15.0  * sacdata.gcarc
                 
@@ -1676,9 +1699,22 @@ class cmtproblem(object):
                 else:                    
                     tbeg = self.data[chan_id].b - self.data[chan_id].o
                     tend = self.data[chan_id].e - self.data[chan_id].o
-                plt.plot([tbeg,tend],[0,0],'ro')
-                ib = int((tbeg+sacdata.o-sacdata.b)/sacdata.delta)
-                ie = ib+int((tend-tbeg)/sacdata.delta)
+                if isinstance(tbeg,list):
+                    assert len(tbeg)==len(tend), 'Inconsistent tbeg and tend for'%(chan_id)
+                    for i in range(len(tbeg)):
+                        plt.plot([tbeg[i],tend[i]],[0,0],'o')
+                else:
+                    plt.plot([tbeg,tend],[0,0],'ro')
+                if isinstance(tbeg,list):
+                    tb = tbeg[0]
+                    te = tend[-1]
+                    ib = int((tbeg[0]+sacdata.o-sacdata.b)/sacdata.delta)
+                    ie = ib+int((tend[-1]-tbeg[0])/sacdata.delta)
+                else:
+                    tb = tbeg
+                    te = tend
+                    ib = int((tbeg+sacdata.o-sacdata.b)/sacdata.delta)
+                    ie = ib+int((tend-tbeg)/sacdata.delta)
                 if ib<0:
                     ib = 0
                 if ie>sacdata.npts:
@@ -1687,11 +1723,11 @@ class cmtproblem(object):
                 ymin = -yfactor*a
                 ymax =  yfactor*a                
                 if variable_xlim:
-                    if tbeg - t0delay<0.:
+                    if tb - t0delay<0.:
                         tmin = 0.
                     else:
-                        tmin = tbeg - t0delay
-                    plt.xlim([tmin,tend+tmax])
+                        tmin = tb - t0delay
+                    plt.xlim([tmin,te+tmax])
             ylims = [ymin,ymax]
             plt.ylim(ylims)                    
             # Annotations
