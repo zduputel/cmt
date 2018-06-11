@@ -682,7 +682,12 @@ class cmtproblem(object):
             Norm = 0.5*N*np.log(2.*np.pi)
             if self.pre_weight: # Adding det(Cd)
                 for chan_id in self.chan_ids:
-                    Norm += 0.5 * self.log_Cd_det[chan_id]
+                    npts = np.array(self.data[chan_id].npts)
+                    if npts.size > 1:
+                        for i in range(npts.size):
+                            Norm += 0.5 * self.log_Cd_det[chan_id][i]
+                    else:
+                        Norm += 0.5 * self.log_Cd_det[chan_id]
         else:
             assert Cd.shape[0] == s.size, 'Incorrect size for Cd'
             Cdi = np.linalg.inv(Cd)
@@ -1077,6 +1082,7 @@ class cmtproblem(object):
                         if self.taper:
                             data_sac.depvar[i][:self.taper_n]  *= self.taper_left 
                             data_sac.depvar[i][-self.taper_n:] *= self.taper_right
+                    data_sac.npts = np.array(data_sac.npts) 
                 else:
                     data_sac.depvar = data_sac.depvar[ib:ie+1].copy()
                     if self.taper:
@@ -1084,9 +1090,12 @@ class cmtproblem(object):
                         data_sac.depvar[-self.taper_n:] *= self.taper_right
                     data_sac.npts = len(data_sac.depvar)
                 # Fixing some attributes
-                data_sac.t[0] = tbeg+data_sac.o
-                data_sac.b    = t[ib]+data_sac.o
-                data_sac.e    = t[ie]+data_sac.o
+                if tbeg.size > 1:
+                    data_sac.t = tbeg  + data_sac.o
+                else:
+                    data_sac.t[0] = tbeg  + data_sac.o
+                data_sac.b    = t[ib] + data_sac.o
+                data_sac.e    = t[ie] +data_sac.o
 
             # Populate the dictionary
             self.data[data_sac.id] = data_sac.copy()
@@ -1362,7 +1371,7 @@ class cmtproblem(object):
                     assert chan_id in self.data, 'No channel id %s in data'%(chan_id)
                     data_sac = self.data[chan_id]                    
                     b    = data_sac.b - data_sac.o
-                    npts = data_sac.npts                    
+                    npts = np.array(data_sac.npts)
                     t    = np.arange(gf_sac.npts)*gf_sac.delta+gf_sac.b-gf_sac.o
                     if wpwin:
                         t0 = data_sac.t[0]-data_sac.o
@@ -1395,13 +1404,12 @@ class cmtproblem(object):
                         if ib.size > 1:
                             depvar = gf_sac.depvar.copy()
                             gf_sac.depvar = []
-                            gf_sac.npts   = []
                             for i in range(ib.size):
                                 gf_sac.depvar.append(depvar[ib[i]:ib[i]+npts[i]].copy())
                                 if self.taper:
                                     gf_sac.depvar[i][:self.taper_n]  *= self.taper_left
                                     gf_sac.depvar[i][-self.taper_n:] *= self.taper_right                    
-                                gf_sac.npts   = npts.copy()
+                            gf_sac.npts   = npts.copy()
                     else:
                         if ib<0:
                             gf_sac.depvar = np.append(np.zeros((-ib,)),gf_sac.depvar)
