@@ -721,12 +721,23 @@ class cmtproblem(object):
         # Build D vector
         self.D = []
         for chan_id in self.chan_ids:
+            npts = np.array(self.data[chan_id].npts)
             if self.pre_weight:
-                W = self.W[chan_id]
-                S = self.data[chan_id].depvar
-                self.D.extend(W.dot(S))
+                if npts.size == 1:
+                    W = self.W[chan_id]
+                    S = self.data[chan_id].depvar
+                    self.D.extend(W.dot(S))
+                else:
+                    for i in range(npts.size):
+                        W = self.W[chan_id][i]
+                        S = self.data[chan_id].depvar[i]
+                        self.D.extend(W.dot(S))
             else:
-                self.D.extend(self.data[chan_id].depvar)
+                if npts.size == 1:
+                    self.D.extend(self.data[chan_id].depvar)
+                else:
+                    for i in range(npts.size):
+                        self.D.extend(self.data[chan_id].depvar[i])
         self.D = np.array(self.D)
 
         # All done
@@ -751,17 +762,28 @@ class cmtproblem(object):
         # Initialize G matrix
         self.G = []
         
-        # CMT parameters
+        # CMT parameters 
         if self.cmt_flag:
             for mt in self.cmt.MTnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
+                    npts = np.array(self.data[chan_id].npts)
                     if self.pre_weight:
-                        W = self.W[chan_id]
-                        S = self.gf[chan_id][mt].depvar
-                        self.G[-1].extend(W.dot(S))
+                        if npts.size == 1:
+                            W = self.W[chan_id]
+                            S = self.gf[chan_id][mt].depvar
+                            self.G[-1].extend(W.dot(S))
+                        else:
+                            for i in range(npts.size):
+                                W = self.W[chan_id][i]
+                                S = self.gf[chan_id][mt].depvar[i]
+                                self.G[-1].extend(W.dot(S))
                     else:
-                        self.G[-1].extend(self.gf[chan_id][mt].depvar)
+                        if npts.size == 1:
+                            self.G[-1].extend(self.gf[chan_id][mt].depvar)
+                        else:
+                            for i in range(npts.size):
+                                self.G[-1].extend(self.gf[chan_id][mt].depvar[i])
         
         # FORCE parameters
         if self.force_flag:
@@ -769,11 +791,21 @@ class cmtproblem(object):
                 self.G.append([])
                 for chan_id in self.chan_ids:
                     if self.pre_weight:
-                        W = self.W[chan_id]
-                        S = self.gf[chan_id][f].depvar
-                        self.G[-1].extend(W.dot(S))
+                        if npts.size == 1:
+                            W = self.W[chan_id]
+                            S = self.gf[chan_id][f].depvar
+                            self.G[-1].extend(W.dot(S))
+                        else:
+                            for i in range(npts.size):
+                                W = self.W[chan_id][i]
+                                S = self.gf[chan_id][f].depvar[i]
+                                self.G[-1].extend(W.dot(S))
                     else:
-                        self.G[-1].extend(self.gf[chan_id][f].depvar)
+                        if npts.size == 1:
+                            self.G[-1].extend(self.gf[chan_id][f].depvar)
+                        else:
+                            for i in range(npts.size):
+                                self.G[-1].extend(self.gf[chan_id][f].depvar[i])
 
         # Final touch
         self.G = np.array(self.G).T
@@ -802,7 +834,12 @@ class cmtproblem(object):
         else:
             N = 0
             for chan_id in self.chan_ids:
-                N += self.data[chan_id].npts
+                npts = np.array(self.data[chan_id].npts)
+                if npts.size > 1:
+                    for i in range(npts.size):
+                        N += npts[i]
+                else:
+                    N += npts
 
         # Correlation function
         t = (np.arange(2*N-1)-N+1).astype('float64')
@@ -824,23 +861,40 @@ class cmtproblem(object):
                 sd = np.abs(self.data[chan_id].depvar).max()*noise_level
 
             # Build Cd for this channel
-            npts = self.data[chan_id].npts
-            if tcor:
-                self.Cd[chan_id] = np.zeros((npts,npts))
-                for i in range(npts):
-                    for j in range(npts):
-                        dk = i-j
-                        self.Cd[chan_id][i,j] = corE[N+dk-1]*sd*sd
-                iCd = np.linalg.inv(self.Cd[chan_id])
-            else:
-                self.Cd[chan_id] = np.eye(npts)*sd*sd
-                iCd = np.eye(npts)*1./(sd*sd)
+            npts = np.array(self.data[chan_id].npts)
+            self.Cd[chan_id] = []
+            self.W[chan_id]  = []
+            self.log_Cd_det[chan_id] = []
+            for i in range(npts.size):
+                if npts.size > 1:
+                    n = npts[i]
+                else:
+                    n = npts
+                if tcor:
+                    Cd = np.zeros((n,n))
+                    for i in range(n):
+                        for j in range(n):
+                            dk = i-j
+                            Cd[i,j] = corE[N+dk-1]*sd*sd
+                    iCd = np.linalg.inv(Cd)
+                else:
+                    Cd = np.eye(n)*sd*sd
+                    iCd = np.eye(n)*1./(sd*sd)
 
-            # Define log of det(Cd)
-            self.log_Cd_det[chan_id] = 2.*npts*np.log(sd)
-
-            # Define a preweight matrix
-            self.W[chan_id] = np.linalg.cholesky(iCd).T
+                if npts.size==1:
+                    # Cd
+                    self.Cd[chan_id] = Cd.copy()   
+                    # Define log of det(Cd)
+                    self.log_Cd_det[chan_id] = 2.*n*np.log(sd)
+                    # Define a preweight matrix
+                    self.W[chan_id] = np.linalg.cholesky(iCd).T
+                else:
+                    # Cd
+                    self.Cd[chan_id].append(Cd.copy())
+                    # Define log of det(Cd)
+                    self.log_Cd_det[chan_id].append(2.*n*np.log(sd))
+                    # Define a preweight matrix
+                    self.W[chan_id].append(np.linalg.cholesky(iCd).T)
 
         # All done
         return 
@@ -948,7 +1002,15 @@ class cmtproblem(object):
                 assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
                 tbeg = data_sac.t[0]-data_sac.o
                 if swwin is not None:
-                    tend = tbeg + swwin * data_sac.gcarc
+                    if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
+                        tbeg = [tbeg]
+                        tend = []
+                        for i,sw in enumerate(swwin):
+                            if i>0:
+                                tbeg.append(tend[-1])
+                            tend.append(tbeg[0] + sw * data_sac.gcarc)
+                    else:
+                        tend = tbeg + swwin * data_sac.gcarc
                 else:
                     tend = tbeg + 15.0  * data_sac.gcarc
                 
@@ -968,8 +1030,15 @@ class cmtproblem(object):
             if chan_id in dcwin:                
                 if wpwin:
                     if dcwin[chan_id] is not None:
-                        tbeg = dcwin[chan_id][0] + data_sac.t[0]-data_sac.o
-                        tend = dcwin[chan_id][1] + data_sac.t[0]-data_sac.o
+                        if len(dcwin[chan_id])==2:
+                            tbeg = dcwin[chan_id][0] + data_sac.t[0] - data_sac.o
+                            tend = dcwin[chan_id][1] + data_sac.t[0] - data_sac.o
+                        else:
+                            tbeg = []
+                            tend = []
+                            for i in range(len(dcwin[chan_id])/2):
+                                tbeg.append(dcwin[chan_id][2*i] + data_sac.t[0]-data_sac.o)
+                                tend.append(dcwin[chan_id][2*i+1] + data_sac.t[0]-data_sac.o)
                     else:
                         sys.stderr.write('Warning: No data windowing for %s\n'%(chan_id))
                         tbeg = data_sac.b - data_sac.o
@@ -979,24 +1048,44 @@ class cmtproblem(object):
                     tend = dcwin[chan_id][1] 
 
             if wpwin or dcwin or swwin is not None:
-                self.twin[chan_id] = [tbeg,tend]              
+                t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
+                self.twin[chan_id] = [tbeg,tend]  
+                tbeg = np.array(tbeg)
+                tend = np.array(tend)
                 ib = int((tbeg+data_sac.o-data_sac.b)/data_sac.delta)
                 ie = ib+int((tend-tbeg)/data_sac.delta)
-                t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
-                if ib<0 or ie>data_sac.npts:
+                if ib.size > 1:
+                    if ib[0] < 0 or ie[-1] > data_sac.npts:
+                        sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
+                        continue
+                else:
+                    if ib<0 or ie > data_sac.npts:
                         sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
                         continue
                 if self.taper:
                     ib -= self.taper_n
                     ie += self.taper_n
-                data_sac.depvar = data_sac.depvar[ib:ie+1].copy()
-                if self.taper:
-                    data_sac.depvar[:self.taper_n]  *= self.taper_left
-                    data_sac.depvar[-self.taper_n:] *= self.taper_right
+                # Fixing some attributes
                 data_sac.t[0] = tbeg+data_sac.o
                 data_sac.b    = t[ib]+data_sac.o
                 data_sac.e    = t[ie]+data_sac.o
-                data_sac.npts = len(data_sac.depvar)
+                # Window data
+                if ib.size > 1:
+                    depvar = data_sac.depvar.copy()
+                    data_sac.depvar = []
+                    data_sac.npts = []
+                    for i in range(ib.size):
+                        data_sac.depvar.append(depvar[ib[i]:ie[i]+1].copy())
+                        data_sac.npts.append(len(data_sac.depvar[i]))
+                        if self.taper:
+                            data_sac.depvar[i][:self.taper_n]  *= self.taper_left 
+                            data_sac.depvar[i][-self.taper_n:] *= self.taper_right
+                else:
+                    data_sac.depvar = data_sac.depvar[ib:ie+1].copy()
+                    if self.taper:
+                        data_sac.depvar[:self.taper_n]  *= self.taper_left
+                        data_sac.depvar[-self.taper_n:] *= self.taper_right
+                    data_sac.npts = len(data_sac.depvar)
 
             # Populate the dictionary
             self.data[data_sac.id] = data_sac.copy()
@@ -1280,21 +1369,12 @@ class cmtproblem(object):
                         t0 = data_sac.b-data_sac.o
 
                     if chan_id in self.twin:
-                        t0 = self.twin[chan_id][0]
+                        t0 = np.array(self.twin[chan_id][0])
                     
                     ib = int((t0-gf_sac.b)/gf_sac.delta)
                     ie = ib+data_sac.npts                    
-
-                    if ib<0:
-                        gf_sac.depvar = np.append(np.zeros((-ib,)),gf_sac.depvar)
-                        ib = 0
-                    assert ib>=0, 'Incomplete GF (ie<0)'
-                    assert ie<=gf_sac.npts,'Incomplete GF (ie>npts)'                    
-
-                    gf_sac.depvar = gf_sac.depvar[ib:ib+npts]
-                    if self.taper:
-                        gf_sac.depvar[:self.taper_n]  *= self.taper_left
-                        gf_sac.depvar[-self.taper_n:] *= self.taper_right                    
+                    
+                    # Fixing some attributes
                     gf_sac.kstnm  = data_sac.kstnm
                     gf_sac.kcmpnm = data_sac.kcmpnm
                     gf_sac.knetwk = data_sac.knetwk
@@ -1302,8 +1382,36 @@ class cmtproblem(object):
                     gf_sac.id     = data_sac.id
                     gf_sac.stlo   = data_sac.stlo
                     gf_sac.stla   = data_sac.stla
-                    gf_sac.npts   = npts
                     gf_sac.b      = t[ib]+gf_sac.o
+                    
+                    # Window GFs
+                    if ib.size > 1:
+                        if ib[0]<0:
+                            gf_sac.depvar = np.append(np.zeros((-ib[0],)),gf_sac.depvar)
+                            ib[0] = 0
+                        assert ib[0]>=0, 'Incomplete GF (ie<0)'
+                        assert ie[-1]<=gf_sac.npts,'Incomplete GF (ie>npts)'  
+                        if ib.size > 1:
+                            depvar = gf_sac.depvar.copy()
+                            gf_sac.depvar = []
+                            gf_sac.npts   = []
+                            for i in range(ib.size):
+                                gf_sac.depvar.append(depvar[ib[i]:ib[i]+npts[i]].copy())
+                                if self.taper:
+                                    gf_sac.depvar[i][:self.taper_n]  *= self.taper_left
+                                    gf_sac.depvar[i][-self.taper_n:] *= self.taper_right                    
+                                gf_sac.npts   = npts.copy()
+                    else:
+                        if ib<0:
+                            gf_sac.depvar = np.append(np.zeros((-ib,)),gf_sac.depvar)
+                            ib = 0
+                        assert ib>=0, 'Incomplete GF (ie<0)'
+                        assert ie<=gf_sac.npts,'Incomplete GF (ie>npts)'                    
+                        gf_sac.depvar = gf_sac.depvar[ib:ib+npts]
+                        if self.taper:
+                            gf_sac.depvar[:self.taper_n]  *= self.taper_left
+                            gf_sac.depvar[-self.taper_n:] *= self.taper_right                    
+                        gf_sac.npts   = npts
 
                 # Populate the dictionary
                 self.gf[chan_id][m] = gf_sac.copy()
