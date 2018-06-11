@@ -1013,7 +1013,7 @@ class cmtproblem(object):
                         tend = []
                         for i,sw in enumerate(swwin):
                             if i>0:
-                                tbeg.append(tend[-1])
+                                tbeg.append(tend[-1]+data_sac.delta)
                             tend.append(tbeg[0] + sw * data_sac.gcarc)
                     else:
                         tend = tbeg + swwin * data_sac.gcarc
@@ -1043,7 +1043,7 @@ class cmtproblem(object):
                             tbeg = []
                             tend = []
                             for i in range(len(dcwin[chan_id])/2):
-                                tbeg.append(dcwin[chan_id][2*i] + data_sac.t[0]-data_sac.o)
+                                tbeg.append(dcwin[chan_id][2*i]   + data_sac.t[0]-data_sac.o)
                                 tend.append(dcwin[chan_id][2*i+1] + data_sac.t[0]-data_sac.o)
                     else:
                         sys.stderr.write('Warning: No data windowing for %s\n'%(chan_id))
@@ -1054,11 +1054,11 @@ class cmtproblem(object):
                     tend = dcwin[chan_id][1] 
 
             if wpwin or dcwin or swwin is not None:
-                self.twin[chan_id] = [tbeg,tend]  
                 tbeg = np.array(tbeg)
                 tend = np.array(tend)
                 ib = np.floor((tbeg+data_sac.o-data_sac.b)/data_sac.delta).astype('int')
-                ie = ib+np.floor((tend-tbeg)/data_sac.delta).astype('int')
+                ie = np.floor((tend+data_sac.o-data_sac.b)/data_sac.delta).astype('int')
+                # ib+np.floor((tend-tbeg)/data_sac.delta).astype('int')
                 t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
                 if ib.size > 1:
                     if ib[0] < 0 or ie[-1] > data_sac.npts:
@@ -1068,6 +1068,7 @@ class cmtproblem(object):
                     if ib<0 or ie > data_sac.npts:
                         sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
                         continue
+                self.twin[chan_id] = [tbeg,tend]  
                 if self.taper:
                     ib -= self.taper_n
                     ie += self.taper_n
@@ -1522,23 +1523,40 @@ class cmtproblem(object):
             
         # Loop over channel ids
         for chan_id in self.chan_ids:
+            # Get npts
+            npts = np.array(self.data[chan_id].npts)
+
+            # Populate synt attribute
             self.synt[chan_id] = self.data[chan_id].copy()
-            self.synt[chan_id].depvar *= 0.
+            if npts.size > 1:
+                for i in range(npts.size):
+                    self.synt[chan_id].depvar[i] *= 0.
+            else:
+                self.synt[chan_id].depvar *= 0.
 
             # Loop over moment tensor components 
             if self.cmt_flag:
                 for m in range(6):
                     MTnm=self.cmt.MTnm[m]
-                    self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
+                    if npts.size > 1:
+                        for i in range(npts.size):
+                            self.synt[chan_id].depvar[i] += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar[i]*scale
+                    else:
+                        self.synt[chan_id].depvar += self.cmt.MT[m]*self.gf[chan_id][MTnm].depvar*scale
                 
             # Loop over force components
             if self.force_flag:
                 for m in range(3):
                     Fnm=self.force.Fnm[m]
-                    self.synt[chan_id].depvar += self.force.F[m]*self.gf[chan_id][Fnm].depvar*scale
+                    if npts.size > 1:
+                        for i in range(npts.size):
+                            self.synt[chan_id].depvar[i] += self.force.F[m]*self.gf[chan_id][Fnm].depvar[i]*scale                                
+                    else:
+                        self.synt[chan_id].depvar += self.force.F[m]*self.gf[chan_id][Fnm].depvar*scale
 
             # STF convolution
             if stf is not None:
+                assert npts.size == 1, 'Cannot convolve with stf when using multi time-windows per channel'
                 npts_fft = nextpow2(self.synt[chan_id].npts)
                 fsynt    = np.fft.fft(self.synt[chan_id].depvar,n=npts_fft)
                 freqs= np.fft.fftfreq(n=npts_fft)
@@ -1556,13 +1574,27 @@ class cmtproblem(object):
 
             # RMS calculation
             if self.data is not None:
-                res = self.synt[chan_id].depvar - self.data[chan_id].depvar
-                res = np.sqrt(res.dot(res)/float(self.data[chan_id].npts))
-                nsynt = self.synt[chan_id].depvar.dot(self.synt[chan_id].depvar)
-                nsynt = np.sqrt(nsynt/float(self.synt[chan_id].npts))
-                ndata = self.data[chan_id].depvar.dot(self.data[chan_id].depvar)
-                ndata = np.sqrt(ndata/float(self.data[chan_id].npts))                
-                self.rms[chan_id] = [res,ndata,nsynt]
+                if npts.size > 1:
+                    self.rms[chan_id] = []
+                for i in range(npts.size):
+                    if npts.size > 1:
+                        N = npts[i]
+                        d = self.data[chan_id].depvar[i]
+                        s = self.synt[chan_id].depvar[i]
+                    else:
+                        N = npts
+                        d = self.data[chan_id].depvar
+                        s = self.synt[chan_id].depvar
+                    res = s - d
+                    res = np.sqrt(res.dot(res)/float(N))
+                    nsynt = s.dot(s)
+                    nsynt = np.sqrt(nsynt/float(N))
+                    ndata = d.dot(d)
+                    ndata = np.sqrt(ndata/float(N))                
+                    if npts.size > 1:
+                        self.rms[chan_id].append([res,ndata,nsynt])
+                    else:
+                        self.rms[chan_id] = [res,ndata,nsynt]
                 
 
         # All done
