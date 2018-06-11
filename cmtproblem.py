@@ -790,6 +790,7 @@ class cmtproblem(object):
             for f in self.force.Fnm:
                 self.G.append([])
                 for chan_id in self.chan_ids:
+                    npts = np.array(self.data[chan_id].npts)
                     if self.pre_weight:
                         if npts.size == 1:
                             W = self.W[chan_id]
@@ -1030,7 +1031,7 @@ class cmtproblem(object):
             if chan_id in dcwin:                
                 if wpwin:
                     if dcwin[chan_id] is not None:
-                        if len(dcwin[chan_id])==2:
+                        if len(dcwin[chan_id]) == 2:
                             tbeg = dcwin[chan_id][0] + data_sac.t[0] - data_sac.o
                             tend = dcwin[chan_id][1] + data_sac.t[0] - data_sac.o
                         else:
@@ -1048,12 +1049,12 @@ class cmtproblem(object):
                     tend = dcwin[chan_id][1] 
 
             if wpwin or dcwin or swwin is not None:
-                t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
                 self.twin[chan_id] = [tbeg,tend]  
                 tbeg = np.array(tbeg)
                 tend = np.array(tend)
-                ib = int((tbeg+data_sac.o-data_sac.b)/data_sac.delta)
-                ie = ib+int((tend-tbeg)/data_sac.delta)
+                ib = np.floor((tbeg+data_sac.o-data_sac.b)/data_sac.delta).astype('int')
+                ie = ib+np.floor((tend-tbeg)/data_sac.delta).astype('int')
+                t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
                 if ib.size > 1:
                     if ib[0] < 0 or ie[-1] > data_sac.npts:
                         sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
@@ -1065,10 +1066,6 @@ class cmtproblem(object):
                 if self.taper:
                     ib -= self.taper_n
                     ie += self.taper_n
-                # Fixing some attributes
-                data_sac.t[0] = tbeg+data_sac.o
-                data_sac.b    = t[ib]+data_sac.o
-                data_sac.e    = t[ie]+data_sac.o
                 # Window data
                 if ib.size > 1:
                     depvar = data_sac.depvar.copy()
@@ -1086,6 +1083,10 @@ class cmtproblem(object):
                         data_sac.depvar[:self.taper_n]  *= self.taper_left
                         data_sac.depvar[-self.taper_n:] *= self.taper_right
                     data_sac.npts = len(data_sac.depvar)
+                # Fixing some attributes
+                data_sac.t[0] = tbeg+data_sac.o
+                data_sac.b    = t[ib]+data_sac.o
+                data_sac.e    = t[ie]+data_sac.o
 
             # Populate the dictionary
             self.data[data_sac.id] = data_sac.copy()
@@ -1371,7 +1372,7 @@ class cmtproblem(object):
                     if chan_id in self.twin:
                         t0 = np.array(self.twin[chan_id][0])
                     
-                    ib = int((t0-gf_sac.b)/gf_sac.delta)
+                    ib = np.floor((t0-gf_sac.b)/gf_sac.delta).astype('int')
                     ie = ib+data_sac.npts                    
                     
                     # Fixing some attributes
