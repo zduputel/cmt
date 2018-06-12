@@ -693,19 +693,19 @@ class cmtproblem(object):
             Cdi = np.linalg.inv(Cd)
             Cd_det = np.linalg.det(Cd)
             Norm = 0.5 * (N*np.log(2.*np.pi)+np.log(Cd_det))
-        
         # Log-likelihood 
         llk = -0.5 * (d - G.dot(m)).T.dot(Cdi).dot(d - G.dot(m)) 
         llk -= Norm
-
+         
         # Get AIC
         if AIC:
             AIC = 2*M - 2*llk # !! BIC = -p(D) of Bishop, 2006)
             return AIC
-
+         
         # Get BIC
         BIC = M*np.log(N) - 2*llk # !! BIC = -2*p(D) of Bishop, 2006)
         return BIC
+
         
     def buildD(self,pre_weight=False):
         '''
@@ -864,16 +864,25 @@ class cmtproblem(object):
                 else:
                     sd = sigma_d
             else:
-                sd = np.abs(self.data[chan_id].depvar).max()*noise_level
-
+                npts = np.array(self.data[chan_id].npts)
+                if npts.size > 1:
+                    sd = []
+                    for i in range(npts.size):
+                        if i==0:
+                            sd.append(np.abs(self.data[chan_id].depvar[i]).max()*noise_level)
+                        else:
+                            sd.append(np.abs(self.data[chan_id].depvar[i]).max()*noise_level)
+                else:
+                    sd = np.abs(self.data[chan_id].depvar).max()*noise_level
+                
             # Build Cd for this channel
             npts = np.array(self.data[chan_id].npts)
             self.Cd[chan_id] = []
             self.W[chan_id]  = []
             self.log_Cd_det[chan_id] = []
-            for i in range(npts.size):
+            for k in range(npts.size):
                 if npts.size > 1:
-                    n = npts[i]
+                    n = npts[k]
                 else:
                     n = npts
                 if tcor:
@@ -881,12 +890,19 @@ class cmtproblem(object):
                     for i in range(n):
                         for j in range(n):
                             dk = i-j
-                            Cd[i,j] = corE[N+dk-1]*sd*sd
+                            if npts.size > 1:
+                                Cd[i,j] = corE[N+dk-1]*sd[k]*sd[k]
+                            else:
+                                Cd[i,j] = corE[N+dk-1]*sd*sd
                     iCd = np.linalg.inv(Cd)
                 else:
-                    Cd = np.eye(n)*sd*sd
-                    iCd = np.eye(n)*1./(sd*sd)
-
+                    if npts.size > 1:
+                        Cd = np.eye(n)*sd[k]*sd[k]
+                        iCd = np.eye(n)*1./(sd[k]*sd[k])
+                    else:
+                        Cd = np.eye(n)*sd*sd
+                        iCd = np.eye(n)*1./(sd*sd)
+                    
                 if npts.size==1:
                     # Cd
                     self.Cd[chan_id] = Cd.copy()   
@@ -898,10 +914,10 @@ class cmtproblem(object):
                     # Cd
                     self.Cd[chan_id].append(Cd.copy())
                     # Define log of det(Cd)
-                    self.log_Cd_det[chan_id].append(2.*n*np.log(sd))
+                    self.log_Cd_det[chan_id].append(2.*n*np.log(sd[k]))
                     # Define a preweight matrix
                     self.W[chan_id].append(np.linalg.cholesky(iCd).T)
-
+                    
         # All done
         return 
         
