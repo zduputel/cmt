@@ -189,6 +189,26 @@ class cmt(object):
         # All done
         return TM
 
+    def setfromfullMT(self,TM):
+        '''
+        Set moment tensor in self.MT from a full moment tensor
+        Args:
+            * TM: full moment tensor (3x3)
+        '''
+
+        # Initialize self.MT
+        self.MT = np.zeros((6,))
+
+        # Set MT
+        self.MT[0] = TM[0,0]
+        self.MT[1] = TM[1,1]
+        self.MT[2] = TM[2,2]
+        self.MT[3] = TM[0,1]
+        self.MT[4] = TM[0,2]
+        self.MT[5] = TM[1,2]
+
+        # All done
+        return
     
     def v2sdr(self,vn,vs,tol=0.001):
         '''
