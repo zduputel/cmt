@@ -1068,6 +1068,26 @@ class cmtproblem(object):
                 else:
                     tbeg = dcwin[chan_id][0] 
                     tend = dcwin[chan_id][1] 
+            elif 'default' in dcwin:
+                if wpwin:
+                    if dcwin['default'] is not None:
+                        if len(dcwin['default']) == 2:
+                            tbeg = dcwin['default'][0] + data_sac.t[0] - data_sac.o
+                            tend = dcwin['default'][1] + data_sac.t[0] - data_sac.o
+                        else:
+                            tbeg = []
+                            tend = []
+                            for i in range(len(dcwin['default'])/2):
+                                tbeg.append(dcwin['default'][2*i]   + data_sac.t[0]-data_sac.o)
+                                tend.append(dcwin['default'][2*i+1] + data_sac.t[0]-data_sac.o)
+                    else:
+                        sys.stderr.write('Warning: No data windowing for default\n')
+                        tbeg = data_sac.b - data_sac.o
+                        tend = data_sac.e - data_sac.o
+                else:
+                    tbeg = dcwin['default'][0] 
+                    tend = dcwin['default'][1] 
+                
 
             if wpwin or dcwin or swwin is not None:
                 tbeg = np.array(tbeg)
@@ -1187,6 +1207,25 @@ class cmtproblem(object):
                 else:
                     tbeg = dcwin[chan_id][0] 
                     tend = dcwin[chan_id][1] 
+            elif 'default' in dcwin:
+                if wpwin:
+                    if dcwin['default'] is not None:
+                        if len(dcwin['default']) == 2:
+                            tbeg = dcwin['default'][0] + data_sac.t[0] - data_sac.o
+                            tend = dcwin['default'][1] + data_sac.t[0] - data_sac.o
+                        else:
+                            tbeg = []
+                            tend = []
+                            for i in range(len(dcwin['default'])/2):
+                                tbeg.append(dcwin['default'][2*i]   + data_sac.t[0]-data_sac.o)
+                                tend.append(dcwin['default'][2*i+1] + data_sac.t[0]-data_sac.o)
+                    else:
+                        sys.stderr.write('Warning: No data windowing for default\n')
+                        tbeg = data_sac.b - data_sac.o
+                        tend = data_sac.e - data_sac.o
+                else:
+                    tbeg = dcwin['default'][0] 
+                    tend = dcwin['default'][1] 
 
             self.twin[chan_id] = [tbeg,tend]
             
