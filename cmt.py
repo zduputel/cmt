@@ -183,8 +183,9 @@ class cmt(object):
         lon = self.hypo_lon
         dep = self.hypo_dep
         # Set the pde line
-        hp = '%9.4f %9.4f %5.1f %3.1f %3.1f HAWAII  \n'%(lat,lon,dep,mag,mag)
-        self.pdeline = ' PDE '+ot+hp
+        hp = '%9.4f %9.4f %5.1f %3.1f %3.1f '%(lat,lon,dep,mag,mag)
+        pl = ' PDE ' + ot + hp + self.pdeline[61:]
+        self.pdeline = pl
         # All done
         return
         
