@@ -50,30 +50,42 @@ class cmt(object):
     '''
     A simple cmt class
     '''
-    def __init__(self,pdeline=None,evid=None,ts=None,hd=None,lon=None,lat=None,dep=None,MT=None,filename=None):
+    def __init__(self,pdeline=None,evid=None,otime=None,hypo_lat=None,hypo_lon=None,hypo_dep=None,
+                 ts=None,hd=None,lon=None,lat=None,dep=None, MT=None,fullMT=False,filename=None):
         '''
         Constructor
         Args:
             * pdeline: PDE line
             * evid: event id
+            * otime: origin time (datetime.datetime object)
+            * hypo_lat: hypocenter latitude
+            * hypo_lon: hypocenter longitude
+            * hypo_dep: hypocenter depth
             * ts: time-shift
             * hd: half-duration
             * lon: centroid longitude
             * lat: centroid latitude
             * dep: centroid depth
             * MT: moment tensor
+            * fullMT: if True MT is a full moment tensor, otherwise it is a vector
             * filename: if provided, will read parameters from a cmtsolution file
         '''
         # Assign cmt parameters
         self.pdeline = pdeline
         self.evid = evid
         self.MTnm = ['rr','tt','pp','rt','rp','tp']
-        self.MT  = MT
+        self.MT = None
+        if MT is not None:
+            self.set_MT(MT)
         self.ts  = ts
         self.hd  = hd
         self.lon = lon
         self.lat = lat
         self.dep = dep
+        self.otime = otime
+        self.hypo_lat = hypo_lat
+        self.hypo_lon = hypo_lon
+        self.hypo_dep = hypo_dep
         
         # Read CMTSOLUTION file (if filename is provided)
         if filename is not None:
@@ -102,7 +114,25 @@ class cmt(object):
                 self.MT[i]=float(L[i+7].strip().split(':')[1])*scale
         # All done
 
-    def hypofromPDE(self):
+    def set_hypo(self,otime,hypo_lat,hypo_lon,hypo_dep):
+        '''
+        Set hypocenter and origin time
+        Args:
+            * otime: origin time (datetime.datetime object)
+            * hypo_lat: hypocenter latitude (float)
+            * hypo_lon: hypocenter longitude (float)
+            * hypo_dep: hypocenter depth (float)
+        '''
+        # Set otime
+        self.otime = otime
+        # Set hypocenter
+        self.hypo_lat=hypo_lat
+        self.hypo_lon=hypo_lon
+        self.hypo_dep=hypo_dep
+        # All done
+        return
+
+    def set_hypofromPDE(self):
         '''
         Parses origin time and hypocenter coordinates from self.pdeline
         '''
@@ -115,12 +145,48 @@ class cmt(object):
         omin   = int(items[4])
         osec   = int(float(items[5]))
         omsec  = int((float(items[5])-float(osec))*1.0e6)
-        self.otime = datetime(oyear,omonth,oday,ohour,omin,osec,omsec)
+        otime = datetime(oyear,omonth,oday,ohour,omin,osec,omsec)
         # Hypocenter coordinates
-        self.hypo_lat = float(items[6])
-        self.hypo_lon = float(items[7])
-        self.hypo_dep = float(items[8])
+        lat = float(items[6])
+        lon = float(items[7])
+        dep = float(items[8])
+        # Set attributes
+        self.set_hypo(otime,lat,lon,dep)
         # All done
+        return
+
+    def set_PDEfromhypo(self,mag=None):
+        '''
+        Build a pde line from hypocenter coordinates and origin time
+        Args:
+            * mag: magnitude to indicate in the PDE_line 
+              (by default we estimate magnitude from MT components
+               or set mag=0.0 if selt.MT is none)
+        '''
+        # Check inputs
+        assert self.otime is not None, 'otime is not set'
+        assert self.hypo_lat is not None, 'pde lat is not set'
+        assert self.hypo_lon is not None, 'pde lon is not set'
+        assert self.hypo_dep is not None, 'pde dep is not set'
+        # Magnitude
+        if mag is None:
+            if self.MT is not None:
+                mag = self.Mw()
+            else:
+                mag = 0.0 
+        # Origin time
+        o = self.otime
+        s = o.second + o.microsecond * 1e-6
+        ot = '%4d %2d %2d %2d %2d %5.2f'%(o.year,o.month,o.day,o.hour,o.minute,s)
+        # Hypocenter
+        lat = self.hypo_lat
+        lon = self.hypo_lon
+        dep = self.hypo_dep
+        # Set the pde line
+        hp = '%9.4f %9.4f %5.1f %3.1f %3.1f HAWAII'%(lat,lon,dep,mag,mag)
+        self.pdeline = ' PDE '+ot+hp
+        # All done
+        return
         
     def wcmtfile(self,cmtfil,scale=1.):
         '''
@@ -189,23 +255,29 @@ class cmt(object):
         # All done
         return TM
 
-    def setfromfullMT(self,TM):
+    def set_MT(self,MT,fullMT=False):
         '''
         Set moment tensor in self.MT from a full moment tensor
         Args:
-            * TM: full moment tensor (3x3)
+            * MT: moment tensor elements
+            * fullMT: if True, MT is a full moment tensor matrix 
+                      if False, MT is just a vector of moment tensor elements
         '''
 
         # Initialize self.MT
         self.MT = np.zeros((6,))
 
         # Set MT
-        self.MT[0] = TM[0,0]
-        self.MT[1] = TM[1,1]
-        self.MT[2] = TM[2,2]
-        self.MT[3] = TM[0,1]
-        self.MT[4] = TM[0,2]
-        self.MT[5] = TM[1,2]
+        if full_MT:
+            self.MT[0] = TM[0,0]
+            self.MT[1] = TM[1,1]
+            self.MT[2] = TM[2,2]
+            self.MT[3] = TM[0,1]
+            self.MT[4] = TM[0,2]
+            self.MT[5] = TM[1,2]
+        else:
+            for i in range(6):
+                self.MT[i] = MT[i]
 
         # All done
         return
