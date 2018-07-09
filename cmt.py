@@ -269,13 +269,13 @@ class cmt(object):
         self.MT = np.zeros((6,))
 
         # Set MT
-        if full_MT:
-            self.MT[0] = TM[0,0]
-            self.MT[1] = TM[1,1]
-            self.MT[2] = TM[2,2]
-            self.MT[3] = TM[0,1]
-            self.MT[4] = TM[0,2]
-            self.MT[5] = TM[1,2]
+        if fullMT:
+            self.MT[0] = MT[0,0]
+            self.MT[1] = MT[1,1]
+            self.MT[2] = MT[2,2]
+            self.MT[3] = MT[0,1]
+            self.MT[4] = MT[0,2]
+            self.MT[5] = MT[1,2]
         else:
             for i in range(6):
                 self.MT[i] = MT[i]
