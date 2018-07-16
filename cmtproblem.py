@@ -1775,7 +1775,8 @@ class cmtproblem(object):
         return
 
     def traces(self,length=3000,i_sac_lst=None,show_win=False,swwin=None,wpwin=None,t0delay=150.,
-               variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1):
+               variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1,
+               map_type='global'):
         '''
         Plot data / synt traces
         Args:
@@ -1789,6 +1790,8 @@ class cmtproblem(object):
             * staloc: station locations as an array of [stla,stlo,az,dist]
             * ofile: pdf file name
             * yfactor: for ylim
+            * map_type: default is 'global', can be 'reginal' or a dictionary
+                        to use different maps for different stations
         '''
 
         import matplotlib
@@ -1953,7 +1956,21 @@ class cmtproblem(object):
             plt.grid()
             
             # Map
-            m = Basemap(projection='ortho',lat_0=sacdata.evla,lon_0=sacdata.evlo,resolution='c')
+            global_map = True
+            if isinstance(map_type,dict):
+                if chan_id in map_type:
+                    map_flag = map_type[chan_id]
+                else:
+                    map_flag = map_type['default']
+            else:
+                map_flag = map_type
+            if map_flag == 'regional':
+                global_map = False
+            if global_map:
+                m = Basemap(projection='ortho',lat_0=sacdata.evla,lon_0=sacdata.evlo,resolution='c')
+            else:
+                m = Basemap(projection='laea',lat_0=sacdata.evla,lon_0=sacdata.evlo, width=0.5*1.11e5,
+                        height=0.5*1.11e5,resolution ='h')
             pos  = ax.get_position().get_points()
             W  = pos[1][0]-pos[0][0] ; H  = pos[1][1]-pos[0][1] ;        
             ax2 = plt.axes([pos[1][0]-W*0.38,pos[0][1]+H*0.01,H*1.08,H*1.00])
