@@ -1776,7 +1776,7 @@ class cmtproblem(object):
 
     def traces(self,length=3000,i_sac_lst=None,show_win=False,swwin=None,wpwin=None,t0delay=150.,
                variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1,
-               map_type='global'):
+               wav_factor=1000., map_type='global',figsize=[11.69,8.270],nc = 3,nl = 5, i0=1):
         '''
         Plot data / synt traces
         Args:
@@ -1792,6 +1792,10 @@ class cmtproblem(object):
             * yfactor: for ylim
             * map_type: default is 'global', can be 'reginal' or a dictionary
                         to use different maps for different stations
+            * figsize: Size of the figure (default: [11.69,8.270])                        
+            * nc: Number of columns (default: 3)
+            * nl: Number of lines (default: 5)
+            * i0: index of the first subplot in the first page (default: 1)
         '''
 
         import matplotlib
@@ -1813,11 +1817,14 @@ class cmtproblem(object):
                 i_sac[items[1]] = items[0]
             
         # Create figure
-        fig = plt.figure()
-        fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
+        fig = plt.figure(figsize=figsize)
+        if nc==1:
+            fig.subplots_adjust(bottom=0.06,top=0.87,left=0.2,right=0.95,wspace=0.25,hspace=0.4)        
+        else:
+            fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
         pp = matplotlib.backends.backend_pdf.PdfPages(ofile)
-        nc = 3
-        nl = 5
+        nc = nc
+        nl = nl
         perpage = nc * nl
 
         if staloc is None:
@@ -1833,7 +1840,7 @@ class cmtproblem(object):
         ntot   = len(self.chan_ids)
         npages = np.ceil(float(ntot)/float(perpage))
         nchan = 1
-        count = 1        
+        count = i0
         pages = 1
         for chan_id in self.chan_ids:
             if i_sac_lst is not None:                
@@ -1850,15 +1857,18 @@ class cmtproblem(object):
                 plt.close()
                 pages += 1
                 count = 1
-                fig = plt.figure()
-                fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)
+                fig = plt.figure(figsize=figsize)
+                if nc==1:
+                    fig.subplots_adjust(bottom=0.06,top=0.87,left=0.2,right=0.95,wspace=0.25,hspace=0.4)        
+                else:
+                    fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
             # Time window
             t1 = np.arange(sacdata.npts,dtype='double')*sacdata.delta + sacdata.b - sacdata.o
             t2 = np.arange(sacsynt.npts,dtype='double')*sacsynt.delta + sacsynt.b - sacsynt.o
             # Plot trace
             ax = plt.subplot(nl,nc,count)
-            plt.plot(t1,sacdata.depvar*1000.,'k-')
-            plt.plot(t2,sacsynt.depvar*1000.,'r-')
+            plt.plot(t1,sacdata.depvar*wav_factor,'k-')
+            plt.plot(t2,sacsynt.depvar*wav_factor,'r-')
             # Axes limits
             #plt.xlim([t1[0],t1[-1]+(t1[-1]-t1[0])*0.4])
             t0 = t1[0] - t0delay
@@ -1872,7 +1882,7 @@ class cmtproblem(object):
             else:
                 tmax = length
             plt.xlim([t0,t0+tmax])
-            a    = np.absolute(sacdata.depvar).max()*1000.
+            a    = np.absolute(sacdata.depvar).max()*wav_factor
             ymin = -yfactor*a
             ymax =  yfactor*a
             if show_win:
@@ -1926,7 +1936,7 @@ class cmtproblem(object):
                     ib = 0
                 if ie>sacdata.npts:
                     ie = sacdata.npts
-                a    = np.absolute(sacdata.depvar[ib:ie]).max()*1000.
+                a    = np.absolute(sacdata.depvar[ib:ie]).max()*wav_factor
                 ymin = -yfactor*a
                 ymax =  yfactor*a                
                 if variable_xlim:
@@ -1951,6 +1961,12 @@ class cmtproblem(object):
             plt.title(label,fontsize=10.0,va='center',ha='center')
             if not (count-1)%nc:
                 plt.ylabel('mm',fontsize=10)
+                if wav_factor==1:
+                    plt.ylabel('m',fontsize=10)
+                elif wav_factor==1e6:
+                    plt.ylabel(u'$\mu$m',fontsize=10)
+                elif wav_factor==1e9:
+                    plt.ylabel(u'nm',fontsize=10)
             if (count-1)/nc == nl-1 or nchan+nc > ntot:
                 plt.xlabel('time, sec',fontsize=10) 
             plt.grid()
@@ -1973,7 +1989,10 @@ class cmtproblem(object):
                         height=0.5*1.11e5,resolution ='h')
             pos  = ax.get_position().get_points()
             W  = pos[1][0]-pos[0][0] ; H  = pos[1][1]-pos[0][1] ;        
-            ax2 = plt.axes([pos[1][0]-W*0.38,pos[0][1]+H*0.01,H*1.08,H*1.00])
+            if nc==1:
+                ax2 = plt.axes([pos[1][0]-W*0.7,pos[0][1]+H*0.01,W*1.08,H*1.00])
+            else:
+                ax2 = plt.axes([pos[1][0]-W*0.38,pos[0][1]+H*0.01,H*1.08,H*1.00])
             m.drawcoastlines(linewidth=0.5,zorder=900)
             m.fillcontinents(color='0.75',lake_color=None)
             m.drawparallels(np.arange(-60,90,30.0),linewidth=0.2)
@@ -1982,10 +2001,10 @@ class cmtproblem(object):
             xs,ys = m(coords[:,1],coords[:,0])
             xr,yr = m(sacdata.stlo,sacdata.stla)
             xc,yc = m(sacdata.evlo,sacdata.evla)
-            m.plot(xs,ys,'o',color=(1.00000,  0.74706,  0.00000),ms=4.0,alpha=1.0,zorder=1000)
-            m.plot([xr],[yr],'o',color=(1,.27,0),ms=8,alpha=1.0,zorder=1001)
-            m.scatter([xc],[yc],c='b',marker=(5,1,0),s=120,zorder=1002)                
-            
+            m.plot(xs,ys,'o',color=(1.00000,  0.74706,  0.00000),mec='k',mew=0.5,ms=4.0,alpha=1.0,zorder=1000)
+            m.plot([xr],[yr],'o',color=(1,.27,0),mec='k',mew=0.5,ms=8,alpha=1.0,zorder=1001)
+            m.scatter([xc],[yc],c='b',marker=(5,1,0),s=120,edgecolor='k',linewidth=0.5,zorder=1002)                
+             
             plt.axes(ax)
             count += 1
             nchan += 1
