@@ -182,7 +182,7 @@ def ts_hd_misfit(inputs):
         cmtp_ts = cmtp_hd.copy()
         # Prepare kernels
         cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False)
-        cmtp_ts.buildG()
+        cmtp_ts.buildG(pre_weight=cmtp_hd.pre_weight)
         cmtp_ts.cmt.ts = ts
          
         # Invert
@@ -397,8 +397,6 @@ class cmtproblem(object):
             else: 
                 G = self.G
 
-
-        
         # Moment tensor inversion
         if MT is not None:
             m = (G.T.dot(self.D))/(G.T.dot(G))
@@ -555,7 +553,7 @@ class cmtproblem(object):
 
 
     def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,
-                    get_Cm=False,get_BIC=False,get_AIC=False):
+                    ICD=False,get_Cm=False,get_BIC=False,get_AIC=False):
         '''
         Perform inversion for both CMT and single force paramerters (stored in cmtproblem.cmt.MT and cmtproblem.cmt.force)
         Args:
@@ -577,12 +575,19 @@ class cmtproblem(object):
             Gcmt = (self.G[:,:6].dot(MT)).reshape(self.D.size,1)
         elif zero_trace: # Zero trace
             Gcmt = np.empty((self.D.size,5))
-            for i in range(2):
-                Gcmt[:,i] = self.G[:,i] - self.G[:,2]
-            for i in range(3):
-                Gcmt[:,i+2] = self.G[:,i+3]
+            if ICD:
+                Gcmt = getICDG(self.G[:,:6])
+                Gcmt = Gcmt[:,1:]
+            else:
+                for i in range(2):
+                    Gcmt[:,i] = self.G[:,i] - self.G[:,2]
+                for i in range(3):
+                    Gcmt[:,i+2] = self.G[:,i+3]
         else:
-            Gcmt = self.G[:,:6].copy()
+            if ICD:
+                Gcmt = getICDG(self.G[:,:6])
+            else:
+                Gcmt = self.G[:,:6].copy()
 
         # Get the Green's functions for a single force
         if vertical_force:
@@ -616,14 +621,22 @@ class cmtproblem(object):
         if MT is not None:
             self.cmt.MT = m[0] * MT.copy()
         elif zero_trace:
-            self.cmt.MT[5] = m[4]
-            self.cmt.MT[4] = m[3]
-            self.cmt.MT[3] = m[2]
-            self.cmt.MT[0] = m[0]
-            self.cmt.MT[1] = m[1]
-            self.cmt.MT[2] = -m[0] -m[1]
+            if ICD:
+                MICD = np.zeros((6,))
+                MICD[1:] = m[:5].copy()
+                self.cmt.MT = getMTfromICD(MICD)
+            else:
+                self.cmt.MT[5] = m[4]
+                self.cmt.MT[4] = m[3]
+                self.cmt.MT[3] = m[2]
+                self.cmt.MT[0] = m[0]
+                self.cmt.MT[1] = m[1]
+                self.cmt.MT[2] = -m[0] -m[1]
         else:
-            self.cmt.MT = m[:6].copy()
+            if ICD:
+                self.cmt.MT = getMTfromICD(m[:6])
+            else:
+                self.cmt.MT = m[:6].copy()
 
         # Populate force attributes
         if vertical_force:
@@ -710,7 +723,8 @@ class cmtproblem(object):
     def buildD(self,pre_weight=False):
         '''
         Build D matrices from data dictionary
-        if self.Cd exists, will pre-weight D by self.w
+        if pre_weight is true, self.D will be pre-weighted by self.W (if self.Cd/self.W exists)
+        if self.G was already pre-weighted, self.D will also be pre-weighted.
         '''
 
         # Check inputs
@@ -752,6 +766,8 @@ class cmtproblem(object):
     def buildG(self,pre_weight=False):
         '''
         Build G matrices from data dictionary
+        if pre_weight is true, self.G will be pre-weighted by self.W (if self.Cd/self.W exists)
+        if self.D was already pre-weighted, self.G will also be pre-weighted.
         '''
 
         # Check inputs
@@ -1484,8 +1500,8 @@ class cmtproblem(object):
         # All done
         return
     
-    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,
-                        filter_btype='bandpass',derivate=False,zero_trace=True,vertical_force=False,ncpu=None):
+    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,filter_btype='bandpass',
+                        derivate=False,zero_trace=True,vertical_force=False,pre_weight=False,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -1513,6 +1529,16 @@ class cmtproblem(object):
         constraint = zero_trace
         if self.force_flag:
             constraint = vertical_force        
+
+        # Pre-weighting
+        if pre_weight and not self.pre_weight: # Update self.pre_weight
+            assert self.D is None, 'Inconsistent pre-weighting between G and D'
+            self.pre_weight = True
+
+        if self.pre_weight: # Check that everything is consistent
+            assert self.W is not None, 'Weight matrix self.W not built (use buildCd)'
+            if not pre_weight:
+                sys.stderr.write('Warning: will pre-weight G\n')
 
         # Initialize the grid-search
         todo = []
@@ -1798,9 +1824,11 @@ class cmtproblem(object):
             * i0: index of the first subplot in the first page (default: 1)
         '''
 
-        import matplotlib
-        matplotlib.use('PDF')
-        matplotlib.rcParams.update(TRACES_PLOTPARAMS)
+        import matplotlib as mpl
+        mpl.rcParams['pdf.fonttype'] = 42
+        mpl.rcParams['ps.fonttype'] = 42
+        mpl.use('PDF')
+        mpl.rcParams.update(TRACES_PLOTPARAMS)
         import matplotlib.pyplot as plt
         from mpl_toolkits.basemap import Basemap        
 
@@ -1822,7 +1850,7 @@ class cmtproblem(object):
             fig.subplots_adjust(bottom=0.06,top=0.87,left=0.2,right=0.95,wspace=0.25,hspace=0.4)        
         else:
             fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
-        pp = matplotlib.backends.backend_pdf.PdfPages(ofile)
+        pp = mpl.backends.backend_pdf.PdfPages(ofile)
         nc = nc
         nl = nl
         perpage = nc * nl
@@ -1847,9 +1875,10 @@ class cmtproblem(object):
                 sacdata.read(i_sac[chan_id])
             else:
                 sacdata = self.data[chan_id].copy()
-            sacsynt = self.synt[chan_id].copy()
+            if self.synt is not None:
+                sacsynt = self.synt[chan_id].copy()
             if count > perpage:
-                plt.suptitle('CMT3D,   p %d/%d'%(pages,npages), fontsize=16, y=0.95)
+                plt.suptitle('p %d/%d'%(pages,npages), fontsize=16, y=0.95)
                 ofic = 'page_W_%02d.pdf'%(pages)
                 print(ofic)
                 fig.set_rasterized(rasterize)
@@ -1864,11 +1893,13 @@ class cmtproblem(object):
                     fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
             # Time window
             t1 = np.arange(sacdata.npts,dtype='double')*sacdata.delta + sacdata.b - sacdata.o
-            t2 = np.arange(sacsynt.npts,dtype='double')*sacsynt.delta + sacsynt.b - sacsynt.o
+            if self.synt is not None:
+                t2 = np.arange(sacsynt.npts,dtype='double')*sacsynt.delta + sacsynt.b - sacsynt.o
             # Plot trace
             ax = plt.subplot(nl,nc,count)
             plt.plot(t1,sacdata.depvar*wav_factor,'k-')
-            plt.plot(t2,sacsynt.depvar*wav_factor,'r-')
+            if self.synt is not None:
+                plt.plot(t2,sacsynt.depvar*wav_factor,'r-')
             # Axes limits
             #plt.xlim([t1[0],t1[-1]+(t1[-1]-t1[0])*0.4])
             t0 = t1[0] - t0delay
@@ -1980,13 +2011,16 @@ class cmtproblem(object):
                     map_flag = map_type['default']
             else:
                 map_flag = map_type
-            if map_flag == 'regional':
+            if map_flag == 'regional' or map_flag == 'local':
                 global_map = False
             if global_map:
                 m = Basemap(projection='ortho',lat_0=sacdata.evla,lon_0=sacdata.evlo,resolution='c')
-            else:
+            elif map_flag=='local':
                 m = Basemap(projection='laea',lat_0=sacdata.evla,lon_0=sacdata.evlo, width=0.5*1.11e5,
                         height=0.5*1.11e5,resolution ='h')
+            elif map_flag=='regional':
+                m = Basemap(projection='laea',lat_0=sacdata.evla,lon_0=sacdata.evlo, width=20.*1.11e5,
+                        height=20.*1.11e5,resolution ='i')
             pos  = ax.get_position().get_points()
             W  = pos[1][0]-pos[0][0] ; H  = pos[1][1]-pos[0][1] ;        
             if nc==1:
@@ -2011,7 +2045,7 @@ class cmtproblem(object):
         ofic = 'page_W_%02d.pdf'%(pages)
         print(ofic)
         fig.set_rasterized(rasterize)
-        plt.suptitle('CMT3D,    p %d/%d'%(pages,npages), fontsize=16, y=0.95)
+        plt.suptitle('p %d/%d'%(pages,npages), fontsize=16, y=0.95)
         pp.savefig(orientation='landscape')
         plt.close()
         pp.close()       
