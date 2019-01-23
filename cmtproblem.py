@@ -1556,7 +1556,7 @@ class cmtproblem(object):
             # Todo list
             for j,hd in enumerate(hd_search):
                 todo.append([self,j,hd,ts_search,constraint])
-                
+
         # Do the grid-search
         pool = Pool(ncpu)
         outputs = pool.map(ts_hd_misfit,todo)
