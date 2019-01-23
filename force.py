@@ -6,6 +6,7 @@ Written by Z. Duputel and L. Rivera, May 2015
 
 # Externals
 import numpy as np
+from copy     import deepcopy
 from datetime import datetime
 
 class force(object):
@@ -64,7 +65,25 @@ class force(object):
                 self.F[i]=float(L[i+7].strip().split(':')[1])*scale
         # All done
 
-    def hypofromPDE(self):
+    def set_hypo(self,otime,hypo_lat,hypo_lon,hypo_dep):
+        '''
+        Set hypocenter and origin time
+        Args:
+            * otime: origin time (datetime.datetime object)
+            * hypo_lat: hypocenter latitude (float)
+            * hypo_lon: hypocenter longitude (float)
+            * hypo_dep: hypocenter depth (float)
+        '''
+        # Set otime
+        self.otime = otime
+        # Set hypocenter
+        self.hypo_lat=hypo_lat
+        self.hypo_lon=hypo_lon
+        self.hypo_dep=hypo_dep
+        # All done
+        return
+
+    def set_hypofromPDE(self):
         '''
         Parses origin time and hypocenter coordinates from self.pdeline
         '''
@@ -77,12 +96,49 @@ class force(object):
         omin   = int(items[4])
         osec   = int(float(items[5]))
         omsec  = int((float(items[5])-float(osec))*1.0e6)
-        self.otime = datetime(oyear,omonth,oday,ohour,omin,osec,omsec)
+        otime = datetime(oyear,omonth,oday,ohour,omin,osec,omsec)
         # Hypocenter coordinates
-        self.hypo_lat = float(items[6])
-        self.hypo_lon = float(items[7])
-        self.hypo_dep = float(items[8])
+        lat = float(items[6])
+        lon = float(items[7])
+        dep = float(items[8])
+        # Set attributes
+        self.set_hypo(otime,lat,lon,dep)
         # All done
+        return
+
+    def set_PDEfromhypo(self,mag=None):
+        '''
+        Build a pde line from hypocenter coordinates and origin time
+        Args:
+            * mag: magnitude to indicate in the PDE_line 
+              (by default we estimate magnitude from MT components
+               or set mag=0.0 if selt.MT is none)
+        '''
+        # Check inputs
+        assert self.otime is not None, 'otime is not set'
+        assert self.hypo_lat is not None, 'pde lat is not set'
+        assert self.hypo_lon is not None, 'pde lon is not set'
+        assert self.hypo_dep is not None, 'pde dep is not set'
+        # Magnitude
+        if mag is None:
+            if self.MT is not None:
+                mag = self.Mw()
+            else:
+                mag = 0.0 
+        # Origin time
+        o = self.otime
+        s = o.second + o.microsecond * 1e-6
+        ot = '%4d %2d %2d %2d %2d %5.2f'%(o.year,o.month,o.day,o.hour,o.minute,s)
+        # Hypocenter
+        lat = self.hypo_lat
+        lon = self.hypo_lon
+        dep = self.hypo_dep
+        # Set the pde line
+        hp = '%9.4f %9.4f %5.1f %3.1f %3.1f '%(lat,lon,dep,mag,mag)
+        pl = ' PDE ' + ot + hp + self.pdeline[61:]
+        self.pdeline = pl
+        # All done
+        return
         
     def wforcefile(self,forcefil,scale=1.):
         '''
@@ -104,3 +160,9 @@ class force(object):
         fid.close()
         # All done
         
+    def copy(self):
+        '''
+        Returns a copy of the cmt object
+        '''
+        # All done
+        return deepcopy(self)
