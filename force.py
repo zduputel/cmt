@@ -159,6 +159,18 @@ class force(object):
                 fid.write('M%s: %18.6e\n'%(self.Fnm[i],self.F[i]*scale))
         fid.close()
         # All done
+
+    def Mcsf(self):
+        '''
+        Calculate Mcsf (using Dahlen and Tromp convention)
+        '''
+        assert self.F is not None, 'MT must be assigned'
+        # Maximum force amplitude 
+        Fmax = np.sqrt(self.F.dot(self.F))
+        # Get Mcsf (see Kawakatsu, 1989)
+        Mcsf=Fmax*self.hd*self.hd/np.pi*(2-np.sin(2*np.pi)/np.pi)
+        # All done
+        return Mcsf
         
     def copy(self):
         '''
