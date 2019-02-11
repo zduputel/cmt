@@ -651,7 +651,6 @@ class cmtproblem(object):
         out = []
         if get_Cm:
             out.append(np.linalg.inv(G.T.dot(G)))
-        print(len(m))
         if get_BIC:
             BIC = self.getBIC(G,m)
             out.append(BIC)
