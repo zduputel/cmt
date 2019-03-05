@@ -331,6 +331,7 @@ class cmtproblem(object):
         self.G = None     # Green's function matrix
         self.Cd = None    # Data covariance matrix
         self.W  = None    # Data pre-weighting matrix
+        self.log_Cd_det = None # Dictionary of log(det(Cd))
         self.pre_weight = False # By default, there is no pre-weighting
         self.delta = None # Data sampling step
         self.twin = {}    # Time-window dictionary
@@ -666,7 +667,7 @@ class cmtproblem(object):
         return
 
 
-    def getBIC(self,G,m,Cd=None,AIC=False):
+    def getBIC(self,G,m,Cd=None,log_Cd_det=None,AIC=False):
         '''
         Get the Bayesian Information Criterion (e.g., Bishop, 2006)
         Notice that we use the definition of Schwarz and Bishop (which
@@ -686,10 +687,6 @@ class cmtproblem(object):
         N = float(d.size)
         M = float(m.size)
         if Cd is None:
-            #sd = d.max()*0.05 # Sigma_d
-            #sd = np.sqrt(np.sum((d - G.dot(m))**2)/d.size)
-            #Cdi = np.eye(d.size) / (sd * sd)
-            #Norm = 0.5*N*(np.log(2.*np.pi)+np.log(sd*sd))
             Cdi = np.eye(d.size)
             Norm = 0.5*N*np.log(2.*np.pi)
             if self.pre_weight: # Adding det(Cd)
@@ -701,10 +698,21 @@ class cmtproblem(object):
                     else:
                         Norm += 0.5 * self.log_Cd_det[chan_id]
         else:
-            assert Cd.shape[0] == s.size, 'Incorrect size for Cd'
-            Cdi = np.linalg.inv(Cd)
-            Cd_det = np.linalg.det(Cd)
-            Norm = 0.5 * (N*np.log(2.*np.pi)+np.log(Cd_det))
+            if log_Cd_det is not None:
+                Norm = 0.5*N*np.log(2.*np.pi)
+                i = 0
+                Cdi = np.zeros((d.size,d.size))
+                for chan_id in self.chan_ids:
+                    Norm += 0.5 * self.log_Cd_det[chan_id]
+                    Cd_tmp = Cd[chan_id]
+                    Cdi[i:i+Cd_tmp.shape[0],i:i+Cd_tmp.shape[0]] = Cd_tmp.copy()
+                    i += Cd_tmp.shape[0]
+                Cdi = np.linalg.inv(Cdi)
+            else:            
+                assert Cd.shape[0] == d.size, 'Incorrect size for Cd'
+                Cdi = np.linalg.inv(Cd)
+                Cd_det = np.linalg.det(Cd)
+                Norm = 0.5 * (N*np.log(2.*np.pi)+np.log(Cd_det))
         # Log-likelihood 
         llk = -0.5 * (d - G.dot(m)).T.dot(Cdi).dot(d - G.dot(m)) 
         llk -= Norm
@@ -1282,6 +1290,7 @@ class cmtproblem(object):
             * read_from_file: option to read the GF database
                 - if True, load the Green's functions from the sac files in the GF database
                 - if False, use the Green's functions that were previously stored in self.gf                        
+            * windowing : If True, will time-window the Green's functions
         '''
         
         # sacpy.sac instantiation
@@ -1438,7 +1447,7 @@ class cmtproblem(object):
                     gf_sac.derivate()            
 
                 # Time-window matching data
-                if self.data is not None and windowing is not False:
+                if self.data is not None and windowing:
                     assert chan_id in self.data, 'No channel id %s in data'%(chan_id)
                     data_sac = self.data[chan_id]                    
                     b    = data_sac.b - data_sac.o
@@ -1470,8 +1479,8 @@ class cmtproblem(object):
                         if ib[0]<0:
                             gf_sac.depvar = np.append(np.zeros((-ib[0],)),gf_sac.depvar)
                             ib[0] = 0
-                        assert ib[0]>=0, 'Incomplete GF (ie<0)'
-                        assert ie[-1]<=gf_sac.npts,'Incomplete GF (ie>npts)'  
+                        assert ib[0]>=0, 'Incomplete GF (ie<0) for %s'%(chan_id)
+                        assert ie[-1]<=gf_sac.npts,'Incomplete GF (ie>npts) for %s'  %(chan_id)
                         if ib.size > 1:
                             depvar = gf_sac.depvar.copy()
                             gf_sac.depvar = []
@@ -1485,8 +1494,8 @@ class cmtproblem(object):
                         if ib<0:
                             gf_sac.depvar = np.append(np.zeros((-ib,)),gf_sac.depvar)
                             ib = 0
-                        assert ib>=0, 'Incomplete GF (ie<0)'
-                        assert ie<=gf_sac.npts,'Incomplete GF (ie>npts)'                    
+                        assert ib>=0, 'Incomplete GF (ie<0) for %s'%(chan_id)
+                        assert ie<=gf_sac.npts,'Incomplete GF (ie>npts) for %s'%(chan_id)
                         gf_sac.depvar = gf_sac.depvar[ib:ib+npts]
                         if self.taper:
                             gf_sac.depvar[:self.taper_n]  *= self.taper_left
@@ -1582,9 +1591,13 @@ class cmtproblem(object):
         return rms, rmsn
         
 
-    def calcsynt(self,scale=1.,stf=None):
+    def calcsynt(self,scale=1.,windowing=True,stf=None):
         '''
         Compute synthetics. If data exists, will also compute rms
+        Args:
+            * scale: scale factor
+            * windowing: if True, will assume that Green's functions are already windowed according to data
+            * stf: source time function
         '''
 
         # Check that gf and cmt are assigned
@@ -1603,16 +1616,25 @@ class cmtproblem(object):
             
         # Loop over channel ids
         for chan_id in self.chan_ids:
-            # Get npts
-            npts = np.array(self.data[chan_id].npts)
 
             # Populate synt attribute
-            self.synt[chan_id] = self.data[chan_id].copy()
-            if npts.size > 1:
-                for i in range(npts.size):
-                    self.synt[chan_id].depvar[i] *= 0.
+            if self.data is not None and windowing:
+                # Get npts
+                npts = np.array(self.data[chan_id].npts)
+                self.synt[chan_id] = self.data[chan_id].copy()
+                if npts.size > 1:
+                    for i in range(npts.size):
+                        self.synt[chan_id].depvar[i] *= 0.
+                else:
+                    self.synt[chan_id].depvar *= 0.
             else:
-                self.synt[chan_id].depvar *= 0.
+                if self.cmt_flag:
+                    k = MTnm=self.cmt.MTnm[0]
+                else:
+                    k = self.force.Fnm[0]
+                npts = np.array(self.gf[chan_id][k].npts)
+                self.synt[chan_id] = self.gf[chan_id][k].copy()
+                self.synt[chan_id].depvar *= 0
 
             # Loop over moment tensor components 
             if self.cmt_flag:
@@ -1653,7 +1675,7 @@ class cmtproblem(object):
                 #plt.show()
 
             # RMS calculation
-            if self.data is not None:
+            if self.data is not None and windowing:
                 if npts.size > 1:
                     self.rms[chan_id] = []
                 for i in range(npts.size):
