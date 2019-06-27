@@ -7,6 +7,7 @@ Written by Z. Duputel and L. Rivera, May 2015
 # Externals
 from scipy import signal
 from scipy import linalg
+import scipy.optimize as sciopt
 from copy  import deepcopy
 from multiprocessing import Pool, cpu_count
 import numpy as np
@@ -18,7 +19,6 @@ from .cmt   import cmt
 from .force import force
 
 TRACES_PLOTPARAMS = {'backend': 'pdf', 'axes.labelsize': 10,
-                     'pdf.fonttype': 42, 'ps.fonttype':42,
                      'font.size': 10,
                      'xtick.labelsize': 10,
                      'ytick.labelsize': 10,
@@ -357,7 +357,8 @@ class cmtproblem(object):
         # All done
         return
 
-    def cmtinv(self,zero_trace=True,constrainIC=False,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False,get_AIC=False):
+    def cmtinv(self,zero_trace=True,constrainIC=False,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False,get_AIC=False,
+               get_ModelEvidence=False,Cm_ModelEvidence=None,positivity=False):
         '''
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
@@ -399,12 +400,19 @@ class cmtproblem(object):
                 G = self.G
 
         # Moment tensor inversion
-        if MT is not None:
-            m = (G.T.dot(self.D))/(G.T.dot(G))
+        if positivity: # With positivity constraints 
+            if len(G.shape)==1:
+                m,res = sciopt.nnls(G.reshape(self.D.size,1),self.D)
+                m = m[0]
+            else:
+                m,res = sciopt.nnls(G,self.D)
         else:
-            m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
-            if rank < G.shape[1]:
-                warningconditioning(rank,s,1./rcond)
+            if MT is not None:
+                m = (G.T.dot(self.D))/(G.T.dot(G))
+            else:
+                m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+                if rank < G.shape[1]:
+                    warningconditioning(rank,s,1./rcond)
         
         # Fill-out the global RMS attribute
         S  = G.dot(m)
@@ -462,6 +470,12 @@ class cmtproblem(object):
             else:
                 AIC = self.getBIC(G,m,AIC=True)
             out.append(AIC)
+        if get_ModelEvidence:
+            if MT is not None:
+                ME = self.getModelEvidence(G.reshape(self.D.size,1),np.array([m]),Cm=Cm_ModelEvidence)
+            else:
+                ME = self.getModelEvidence(G,m,Cm=Cm_ModelEvidence)
+            out.append(ME)
 
         # All done
         if len(out)==1:
@@ -471,7 +485,8 @@ class cmtproblem(object):
         return
 
 
-    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False, get_AIC=False):
+    def forceinv(self,vertical_force=False,F=None,scale=1.,rcond=1e-4,get_Cm=False, get_BIC=False, get_AIC=False,
+                 get_ModelEvidence=False,Cm_ModelEvidence=False,positivity=False):
         '''
         Perform inversion for a single force (stored in cmtproblem.cmt.force)
         Args:
@@ -501,6 +516,8 @@ class cmtproblem(object):
         if vertical_force or (F is not None):
             m = (G.T.dot(self.D))/(G.T.dot(G))
         else:
+            print(G.shape)
+            print(self.D.shape)
             m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
             if rank < G.shape[1]:
                 warningconditioning(rank,s,1./rcond)
@@ -544,6 +561,12 @@ class cmtproblem(object):
             else:
                 AIC = self.getBIC(G,m,AIC=True)
             out.append(AIC)
+        if get_ModelEvidence:
+            if vertical_force or (F is not None):
+                ME = self.getModelEvidence(G.reshape(self.D.size,1),np.array([m]),Cm=Cm_ModelEvidence)
+            else:
+                ME = self.getModelEvidence(G,m,Cm=Cm_ModelEvidence)
+            out.append(ME)
 
         # All done
         if len(out)==1:
@@ -554,7 +577,8 @@ class cmtproblem(object):
 
 
     def cmtforceinv(self,zero_trace=True,MT=None,vertical_force=False,F=None,scale=1.,rcond=1e-4,
-                    ICD=False,get_Cm=False,get_BIC=False,get_AIC=False):
+                    ICD=False,get_Cm=False,get_BIC=False,get_AIC=False, get_ModelEvidence=False,Cm_ModelEvidence=False,
+                    positivity=False):
         '''
         Perform inversion for both CMT and single force paramerters (stored in cmtproblem.cmt.MT and cmtproblem.cmt.force)
         Args:
@@ -567,8 +591,8 @@ class cmtproblem(object):
             * get_AIC: if True, return the Bayesian information criterion
         '''
 
-        assert self.D is not None, 'D must be assigned before cmtinv'
-        assert self.G is not None, 'G must be assigned before cmtinv'
+        assert self.D is not None, 'D must be assigned before cmtforceinv'
+        assert self.G is not None, 'G must be assigned before cmtforceinv'
         assert self.G.shape[1] == 9, 'cmtproblem not properly initialized for cmtforceinv (%d collumns in self.G)'%(self.G.shape[1])
 
         # Get Green's functions for CMT parameters
@@ -602,9 +626,12 @@ class cmtproblem(object):
         G = np.append(Gcmt,Gforce,axis=1)
         
         # Moment tensor inversion
-        m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
-        if rank < G.shape[1]:
-            warningconditioning(rank,s,1./rcond)
+        if positivity: # With positivity constraints 
+            m,res = sciopt.nnls(G,self.D)
+        else:
+            m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
+            if rank < G.shape[1]:
+                warningconditioning(rank,s,1./rcond)
 
         # Fill-out the global RMS attribute
         S  = G.dot(m)
@@ -658,6 +685,9 @@ class cmtproblem(object):
         if get_AIC:
             AIC = self.getBIC(G,m,AIC=True)
             out.append(AIC)
+        if get_ModelEvidence:
+            ME = self.getModelEvidence(G,m,Cm=Cm_ModelEvidence)
+            out.append(ME)
 
         # All done
         if len(out)==1:
@@ -666,19 +696,17 @@ class cmtproblem(object):
             return out
         return
 
-
-    def getBIC(self,G,m,Cd=None,log_Cd_det=None,AIC=False):
+    def getLLK(self,G,m,Cd=None,log_Cd_det=None,return_Cdi=False):
         '''
-        Get the Bayesian Information Criterion (e.g., Bishop, 2006)
-        Notice that we use the definition of Schwarz and Bishop (which
-        is different from what people use usually)
+        Get the Log likelihood
         Args:
             * G: Green's function matrix
             * m: model vector (MAP)
             * Cd: data covariance matrix
-            * AIC: if True return Akaike Information Criterion istead
+            * return_Cdi: if True return the inverse of Cd
+        Returns:
+            * llk: the log likelihood
         '''
-        
         # Check the inputs
         assert self.D is not None, 'self.D should exist before using getBIC'
         d = self.D
@@ -703,7 +731,7 @@ class cmtproblem(object):
                 i = 0
                 Cdi = np.zeros((d.size,d.size))
                 for chan_id in self.chan_ids:
-                    Norm += 0.5 * self.log_Cd_det[chan_id]
+                    Norm += 0.5 * log_Cd_det[chan_id]
                     Cd_tmp = Cd[chan_id]
                     Cdi[i:i+Cd_tmp.shape[0],i:i+Cd_tmp.shape[0]] = Cd_tmp.copy()
                     i += Cd_tmp.shape[0]
@@ -716,6 +744,59 @@ class cmtproblem(object):
         # Log-likelihood 
         llk = -0.5 * (d - G.dot(m)).T.dot(Cdi).dot(d - G.dot(m)) 
         llk -= Norm
+
+        # All done
+        if return_Cdi:
+            return llk,Cdi
+        else:
+            return llk
+
+    def getModelEvidence(self,G,m,Cd=None,log_Cd_det=None,Cm=None):
+        '''
+        Get Model evidence (i.e., the marginal likelihood)
+        Args:
+            * G: Green's function matrix
+            * m: model vector (MAP)
+            * Cd: data covariance matrix
+            * Cm: Prior model covariance
+        '''
+        # Get log likelihood
+        llk,Cdi = self.getLLK(G,m,Cd,log_Cd_det,return_Cdi=True)
+        N = float(self.D.size)
+        M = float(m.size)
+
+        # Inverse of the Posterior covariance
+        Cmi = G.T.dot(Cdi).dot(G)
+
+        # Get Model Evidence
+        logEvidence = llk + 0.5*M*np.log(2*np.pi) - 0.5*np.log(np.linalg.det(Cmi))
+        if Cm is not None:  # If there is an a piori
+            Cm_det = np.linalg.det(Cm)
+            Cmi    = np.linalg.inv(Cm)
+            logEvidence -= 0.5*N*np.log(2*np.pi) + 0.5*np.log(Cm_det)
+            logEvidence -= 0.5*np.dot(m.T,Cmi).dot(m)
+            print('prior contribution',0.5*N*np.log(2*np.pi) + 0.5*np.log(Cm_det)+0.5*np.dot(m.T,Cmi).dot(m))
+        print(logEvidence)
+
+        # All done
+        return logEvidence
+
+    def getBIC(self,G,m,Cd=None,log_Cd_det=None,AIC=False):
+        '''
+        Get the Bayesian Information Criterion (e.g., Bishop, 2006)
+        Notice that we use the definition of Schwarz and Bishop (which
+        is different from what people use usually)
+        Args:
+            * G: Green's function matrix
+            * m: model vector (MAP)
+            * Cd: data covariance matrix
+            * AIC: if True return Akaike Information Criterion istead
+        '''
+        
+        # Get log likelihood
+        llk = self.getLLK(G,m,Cd,log_Cd_det)
+        N = float(self.D.size)
+        M = float(m.size)
          
         # Get AIC
         if AIC:
@@ -961,7 +1042,9 @@ class cmtproblem(object):
                      Time window from dist/swwin[0] to dist/swwin[1]
                      if swwin[2] exists, it is a minimum window length
                - if wpwin=True: W-phase time windowing
-                     Time window from P arrival time (Ptt) + swwin*gcarc
+                     if len(swwin)==1: Time window from P arrival time (Ptt) + swwin*gcarc
+                     if len(swwin)==4: Use standard WP_WIN4 definition
+                     else: Multiple time windows from P arrival time (Ptt) + swwin[i]*gcarc
             * dcwin: dictionnary of time-windows for individual channels (optional):
                        channel keys are defined following the format of sacpy.sac.id
                        For each channel:
@@ -1048,12 +1131,22 @@ class cmtproblem(object):
                 tbeg = data_sac.t[0]-data_sac.o
                 if swwin is not None:
                     if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
-                        tbeg = [tbeg]
-                        tend = []
-                        for i,sw in enumerate(swwin):
-                            if i>0:
-                                tbeg.append(tend[-1]+data_sac.delta)
-                            tend.append(tbeg[0] + sw * data_sac.gcarc)
+                        if len(swwin)==4: # Standard WP_WIN definition with 4 numbers
+                            wp_win4 = swwin
+                            dist = data_sac.gcarc
+                            if wp_win4[2] > dist:
+                                dist = wp_win4[2]
+                            if wp_win4[3] < dist:
+                                dist = wp_win4[3]
+                            tend = tbeg + wp_win4[1]*dist
+                            tbeg += wp_win4[0]*dist
+                        else:             # Multiple window (to be tested)
+                            tbeg = [tbeg]
+                            tend = []
+                            for i,sw in enumerate(swwin):
+                                if i>0:
+                                    tbeg.append(tend[-1]+data_sac.delta)
+                                tend.append(tbeg[0] + sw * data_sac.gcarc)
                     else:
                         tend = tbeg + swwin * data_sac.gcarc
                 else:
@@ -1121,11 +1214,11 @@ class cmtproblem(object):
                 t    = np.arange(data_sac.npts)*data_sac.delta+data_sac.b-data_sac.o
                 if ib.size > 1:
                     if ib[0] < 0 or ie[-1] > data_sac.npts:
-                        sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
+                        sys.stderr.write('Warning 1: Incomplete data for %s (ib<0 or ie>npts, ib=%d, ie=%d, npts=%d): Rejected\n'%(ifile,ib[0],ib[-1],data_sac.npts))
                         continue
                 else:
                     if ib<0 or ie > data_sac.npts:
-                        sys.stderr.write('Warning: Incomplete data for %s (ib<0 or ie>npts): Rejected\n'%(ifile))
+                        sys.stderr.write('Warning 2: Incomplete data for %s (ib<0 or ie>npts, ib=%d, ie=%d, npts=%d): Rejected\n'%(ifile,ib,ie,data_sac.npts))
                         continue
                 self.twin[chan_id] = [tbeg,tend]  
                 if self.taper:
@@ -1182,12 +1275,23 @@ class cmtproblem(object):
                 tbeg = data_sac.t[0]-data_sac.o
                 if swwin is not None:
                     if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
-                        tbeg = [tbeg]
-                        tend = []
-                        for i,sw in enumerate(swwin):
-                            if i>0:
-                                tbeg.append(tend[-1])
-                            tend.append(tbeg[0] + sw * data_sac.gcarc)
+                        if len(swwin)==4: # Standard WP_WIN definition with 4 numbers
+                            wp_win4 = swwin
+                            dist = data_sac.gcarc
+                            if wp_win4[2] > dist:
+                                dist = wp_win4[2]
+                            if wp_win4[3] < dist:
+                                dist = wp_win4[3]
+                            print(dist)
+                            tend = tbeg + wp_win4[1]*dist
+                            tbeg += wp_win4[0]*dist
+                        else:             # Multiple window (to be tested)
+                            tbeg = [tbeg]
+                            tend = []
+                            for i,sw in enumerate(swwin):
+                                if i>0:
+                                    tbeg.append(tend[-1]+data_sac.delta)
+                                tend.append(tbeg[0] + sw * data_sac.gcarc)
                     else:
                         tend = tbeg + swwin * data_sac.gcarc
                 else:
@@ -1823,7 +1927,8 @@ class cmtproblem(object):
 
     def traces(self,length=3000,i_sac_lst=None,show_win=False,swwin=None,wpwin=None,t0delay=150.,
                variable_xlim=False,rasterize=True,staloc=None,ofile='traces.pdf',yfactor=1.1,
-               wav_factor=1000., map_type='global',figsize=[11.69,8.270],nc = 3,nl = 5, i0=1):
+               wav_factor=1000., map_type='global',figsize=[11.69,8.270],nc = 3,nl = 5, i0=1,
+               xlabel=None,ylabel=None):
         '''
         Plot data / synt traces
         Args:
@@ -1846,9 +1951,6 @@ class cmtproblem(object):
         '''
 
         import matplotlib as mpl
-        mpl.rcParams['pdf.fonttype'] = 42
-        mpl.rcParams['ps.fonttype'] = 42
-        mpl.use('PDF')
         mpl.rcParams.update(TRACES_PLOTPARAMS)
         import matplotlib.pyplot as plt
         from mpl_toolkits.basemap import Basemap        
@@ -1869,8 +1971,10 @@ class cmtproblem(object):
         fig = plt.figure(figsize=figsize)
         if nc==1:
             fig.subplots_adjust(bottom=0.06,top=0.87,left=0.2,right=0.95,wspace=0.25,hspace=0.4)        
+        elif nl>5:
+            fig.subplots_adjust(bottom=0.06,top=0.9,left=0.1,right=0.95,wspace=0.25,hspace=0.5)
         else:
-            fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
+            fig.subplots_adjust(bottom=0.06,top=0.87,left=0.1,right=0.95,wspace=0.25,hspace=0.35)        
         pp = mpl.backends.backend_pdf.PdfPages(ofile)
         nc = nc
         nl = nl
@@ -1910,8 +2014,10 @@ class cmtproblem(object):
                 fig = plt.figure(figsize=figsize)
                 if nc==1:
                     fig.subplots_adjust(bottom=0.06,top=0.87,left=0.2,right=0.95,wspace=0.25,hspace=0.4)        
+                elif nl>5:
+                    fig.subplots_adjust(bottom=0.06,top=0.9,left=0.1,right=0.95,wspace=0.25,hspace=0.5)
                 else:
-                    fig.subplots_adjust(bottom=0.06,top=0.87,left=0.06,right=0.95,wspace=0.25,hspace=0.35)        
+                    fig.subplots_adjust(bottom=0.06,top=0.87,left=0.1,right=0.95,wspace=0.25,hspace=0.35)        
             # Time window
             t1 = np.arange(sacdata.npts,dtype='double')*sacdata.delta + sacdata.b - sacdata.o
             if self.synt is not None:
@@ -1944,12 +2050,22 @@ class cmtproblem(object):
                     tbeg = sacdata.t[0] - sacdata.o
                     if swwin is not None:
                         if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
-                            tbeg = [tbeg]
-                            tend = []
-                            for i,sw in enumerate(swwin):
-                                if i>1:
-                                    tbeg.append(tend[-1])
-                                tend.append(tbeg + sw * data_sac.gcarc)
+                            if len(swwin)==4: # Standard WP_WIN definition with 4 numbers
+                                wp_win4 = swwin
+                                dist = data_sac.gcarc
+                                if wp_win4[2] > dist:
+                                    dist = wp_win4[2]
+                                if wp_win4[3] < dist:
+                                    dist = wp_win4[3]
+                                tend = tbeg + wp_win4[1]*dist
+                                tbeg += wp_win4[0]*dist
+                            else:             # Multiple window (to be tested)
+                                tbeg = [tbeg]
+                                tend = []
+                                for i,sw in enumerate(swwin):
+                                    if i>0:
+                                        tbeg.append(tend[-1]+data_sac.delta)
+                                    tend.append(tbeg[0] + sw * data_sac.gcarc)
                         else:
                             tend = tbeg + swwin * data_sac.gcarc
                     else:
@@ -2019,8 +2135,12 @@ class cmtproblem(object):
                     plt.ylabel(u'$\mu$m',fontsize=10)
                 elif wav_factor==1e9:
                     plt.ylabel(u'nm',fontsize=10)
+                if ylabel is not None:
+                    plt.ylabel(ylabel)
             if (count-1)/nc == nl-1 or nchan+nc > ntot:
                 plt.xlabel('time, sec',fontsize=10) 
+                if xlabel is not None:
+                    plt.xlabel(xlabel)
             plt.grid()
             
             # Map
