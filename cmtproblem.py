@@ -108,7 +108,7 @@ def conv_by_tri_stf(sac_in,delay,half_width):
     for i in range(LH):
         h[i] = 1. - np.float32(i)/np.float32(lh)
     al0 = 2. * h.sum() - h[0]
-    h /= al0
+    h /= al0 * sac_in.delta
 
     # Weighted average
     sac_out.depvar *= 0.
@@ -167,7 +167,7 @@ def ts_hd_misfit(inputs):
         j = inputs[1]
         hd = inputs[2]
         ts_search = inputs[3]
-        # Convolve with triangle of half-duration hd
+        # Convolve with a STF of half-duration hd
         cmtp_hd.preparekernels(delay=0.,stf=hd,read_from_file=False,windowing=False)
         if cmtp.force_flag:
             vertical_force = inputs[4]
