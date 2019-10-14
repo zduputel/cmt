@@ -924,13 +924,14 @@ class cmtproblem(object):
         return
 
 
-    def buildCd(self,sigma_d=None,noise_level=None,tcor=None):
+    def buildCd(self,sigma_d=None,noise_level=None,tcor=None,Cp=None):
         '''
         Build Data covariance a pre-weighting matrix 
         Args:
-            * sigma_d: float or dict[chan_id]
+            * sigma_d: float or dict[chan_id] of standard deviations
             * noise_level: noise level (fraction of max amplitudes)
-            * tcor: correlation length
+            * tcor: correlation length (in samples)
+            * Cp: Dictionary of Cp (one entry per channel)
         '''
         
         # Check inputs
@@ -998,15 +999,28 @@ class cmtproblem(object):
                                 Cd[i,j] = corE[N+dk-1]*sd[k]*sd[k]
                             else:
                                 Cd[i,j] = corE[N+dk-1]*sd*sd
+                    if Cp is not None:
+                        if npts.size > 1:
+                            Cd  += Cp[chan_id][k]
+                        else:
+                            Cd  += Cp[chan_id]
                     iCd = np.linalg.inv(Cd)
                 else:
                     if npts.size > 1:
                         Cd = np.eye(n)*sd[k]*sd[k]
-                        iCd = np.eye(n)*1./(sd[k]*sd[k])
+                        if Cp is not None:
+                            Cd  += Cp[chan_id][k]
+                            iCd = np.linalg.inv(Cd)
+                        else:
+                            iCd = np.eye(n)*1./(sd[k]*sd[k])
                     else:
-                        Cd = np.eye(n)*sd*sd
-                        iCd = np.eye(n)*1./(sd*sd)
-                    
+                        Cd = np.eye(n)*sd*sd 
+                        if Cp is not None:
+                            Cd  += Cp[chan_id]
+                            iCd = np.linalg.inv(Cd)
+                        else:
+                            iCd = np.eye(n)*1./(sd*sd)
+
                 if npts.size==1:
                     # Cd
                     self.Cd[chan_id] = Cd.copy()   
