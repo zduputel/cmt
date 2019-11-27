@@ -1114,7 +1114,7 @@ class cmtproblem(object):
             
             # Read sac file            
             data_sac.read(ifile)
-            assert np.round(data_sac.delta,3)==self.delta, 'data should be sampled at 1sps'
+            assert np.round(data_sac.delta,3)==self.delta, 'All waveforms should have the same sampling rate'
             
             # Filter
             if filter_freq is not None:
