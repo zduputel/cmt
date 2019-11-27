@@ -86,7 +86,7 @@ def conv_by_sin_stf(sac_in,delay,half_width):
             else:
                 xr = sac_in.depvar[ir]
             cum += h[j] * (xr - xl)
-        sac_out.depvar[i] = cum
+        sac_out.depvar[i] = cum*sac_in.delta
 
     # Delay trace
     sac_out.b += delay
@@ -128,7 +128,7 @@ def conv_by_tri_stf(sac_in,delay,half_width):
             else:
                 xr = sac_in.depvar[ir]
             cum += h[j] * (xl + xr)
-        sac_out.depvar[i] = cum
+        sac_out.depvar[i] = cum*sac_in.delta
 
     # Delay trace
     sac_out.b += delay
