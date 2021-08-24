@@ -277,12 +277,14 @@ def parseConfig(cfg_file):
 
     # Fill the config dictionary
     config = {}
-    try:
+    #try:
+    if True:
         config_lines = open(cfg_file, 'r').readlines()
         for line in config_lines:
             if line.find('#')==0:
                 continue
             if line.rstrip():
+                print(line)
                 key,value = line.strip().split(':')
                 key   = key.strip()
                 value = value.strip()
@@ -290,8 +292,8 @@ def parseConfig(cfg_file):
                     config[key].append(value)
                 else:
                     config[key]=value
-    except:
-        raise parseConfigError('Incorrect format in %s!\n'%cfg_file)
+    #except:
+    #    raise parseConfigError('Incorrect format in %s!\n'%cfg_file)
 
     # All done
     return config
@@ -1114,7 +1116,7 @@ class cmtproblem(object):
             
             # Read sac file            
             data_sac.read(ifile)
-            assert np.round(data_sac.delta,3)==self.delta, 'All waveforms should have the same sampling rate'
+            assert np.round(data_sac.delta,3)==np.round(self.delta,3), 'All waveforms should have the same sampling rate (%.3f vs %.3f)'%(data_sac.delta,self.delta)
             
             # Filter
             if filter_freq is not None:
