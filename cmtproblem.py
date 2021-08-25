@@ -1503,7 +1503,7 @@ class cmtproblem(object):
                     gf_sac = self.gf[chan_id][m].copy()
                  
                 # Check the sampling rate (to be improved)
-                assert np.round(gf_sac.delta,3)==self.delta, 'GFs should be sampled with data sampling step (%.3f s)'%(self.delta)
+                assert np.round(gf_sac.delta,3)==np.round(self.delta,3), 'GFs should be sampled with data sampling step (%.3f s)'%(self.delta)
                  
                 # Remove baseline
                 if baseline>0:
