@@ -277,14 +277,12 @@ def parseConfig(cfg_file):
 
     # Fill the config dictionary
     config = {}
-    #try:
-    if True:
+    try:
         config_lines = open(cfg_file, 'r').readlines()
         for line in config_lines:
             if line.find('#')==0:
                 continue
             if line.rstrip():
-                print(line)
                 key,value = line.strip().split(':')
                 key   = key.strip()
                 value = value.strip()
@@ -292,8 +290,8 @@ def parseConfig(cfg_file):
                     config[key].append(value)
                 else:
                     config[key]=value
-    #except:
-    #    raise parseConfigError('Incorrect format in %s!\n'%cfg_file)
+    except:
+        raise parseConfigError('Incorrect format in %s!\n'%cfg_file)
 
     # All done
     return config
@@ -1972,11 +1970,10 @@ class cmtproblem(object):
             * nl: Number of lines (default: 5)
             * i0: index of the first subplot in the first page (default: 1)
         '''
-
         import matplotlib as mpl
         mpl.rcParams.update(TRACES_PLOTPARAMS)
         import matplotlib.pyplot as plt
-        from mpl_toolkits.basemap import Basemap        
+        from cartopy import crs, feature
 
         # Use input sac list instead of self.data        
         if i_sac_lst is not None:
@@ -2075,7 +2072,7 @@ class cmtproblem(object):
                         if isinstance(swwin,np.ndarray) or isinstance(swwin,list):
                             if len(swwin)==4: # Standard WP_WIN definition with 4 numbers
                                 wp_win4 = swwin
-                                dist = data_sac.gcarc
+                                dist = sacdata.gcarc
                                 if wp_win4[2] > dist:
                                     dist = wp_win4[2]
                                 if wp_win4[3] < dist:
@@ -2087,10 +2084,10 @@ class cmtproblem(object):
                                 tend = []
                                 for i,sw in enumerate(swwin):
                                     if i>0:
-                                        tbeg.append(tend[-1]+data_sac.delta)
-                                    tend.append(tbeg[0] + sw * data_sac.gcarc)
+                                        tbeg.append(tend[-1]+sacdata.delta)
+                                    tend.append(tbeg[0] + sw * sacdata.gcarc)
                         else:
-                            tend = tbeg + swwin * data_sac.gcarc
+                            tend = tbeg + swwin * sacdata.gcarc
                     else:
                         tend = tbeg + 15.0  * sacdata.gcarc
                 
@@ -2166,7 +2163,7 @@ class cmtproblem(object):
                     plt.xlabel(xlabel)
             plt.grid()
             
-            # Map
+            # Define map type
             global_map = True
             if isinstance(map_type,dict):
                 if chan_id in map_type:
@@ -2177,32 +2174,46 @@ class cmtproblem(object):
                 map_flag = map_type
             if map_flag == 'regional' or map_flag == 'local':
                 global_map = False
+
+            # Initialize cartopy 
+            lonlat = crs.PlateCarree()
+            evla = sacdata.evla
+            evlo = sacdata.evlo
+            stla = sacdata.stla
+            stlo = sacdata.stlo
             if global_map:
-                m = Basemap(projection='ortho',lat_0=sacdata.evla,lon_0=sacdata.evlo,resolution='c')
-            elif map_flag=='local':
-                m = Basemap(projection='laea',lat_0=sacdata.evla,lon_0=sacdata.evlo, width=0.5*1.11e5,
-                        height=0.5*1.11e5,resolution ='h')
-            elif map_flag=='regional':
-                m = Basemap(projection='laea',lat_0=sacdata.evla,lon_0=sacdata.evlo, width=20.*1.11e5,
-                        height=20.*1.11e5,resolution ='i')
+                proj = crs.cartopy.crs.Orthographic(central_longitude=evlo, central_latitude=evla)
+            else:
+                proj = crs.AzimuthalEquidistant(central_longitude=evlo, central_latitude=evla)
+
+            # Initialize map axes
             pos  = ax.get_position().get_points()
             W  = pos[1][0]-pos[0][0] ; H  = pos[1][1]-pos[0][1] ;        
             if nc==1:
-                ax2 = plt.axes([pos[1][0]-W*0.7,pos[0][1]+H*0.01,W*1.08,H*1.00])
+                ax2 = plt.axes([pos[1][0]-W*0.7,pos[0][1]+H*0.01,W*1.08,H*1.00],projection=proj)
             else:
-                ax2 = plt.axes([pos[1][0]-W*0.38,pos[0][1]+H*0.01,H*1.08,H*1.00])
-            m.drawcoastlines(linewidth=0.5,zorder=900)
-            m.fillcontinents(color='0.75',lake_color=None)
-            m.drawparallels(np.arange(-60,90,30.0),linewidth=0.2)
-            m.drawmeridians(np.arange(0,420,60.0),linewidth=0.2)
-            m.drawmapboundary(fill_color='w')
-            xs,ys = m(coords[:,1],coords[:,0])
-            xr,yr = m(sacdata.stlo,sacdata.stla)
-            xc,yc = m(sacdata.evlo,sacdata.evla)
-            m.plot(xs,ys,'o',color=(1.00000,  0.74706,  0.00000),mec='k',mew=0.5,ms=4.0,alpha=1.0,zorder=1000)
-            m.plot([xr],[yr],'o',color=(1,.27,0),mec='k',mew=0.5,ms=8,alpha=1.0,zorder=1001)
-            m.scatter([xc],[yc],c='b',marker=(5,1,0),s=120,edgecolor='k',linewidth=0.5,zorder=1002)                
-             
+                ax2 = plt.axes([pos[1][0]-W*0.38,pos[0][1]+H*0.01,H*1.08,H*1.00],projection=proj)
+
+            if global_map:
+                ax2.set_global()
+            else:
+                if map_flag=='regional':
+                    DLON = 20.
+                    DLAT = 20.
+                else: # Local
+                    DLON = 0.5
+                    DLAT = 0.5
+                ax2.set_extent([evlo-DLON,evlo+DLON,evla-DLAT,evla+DLAT])
+            
+            # Plot map
+            ax2.coastlines(resolution='110m')
+            ax2.add_feature(feature.OCEAN, zorder=0, color=(.95,.95,1.))
+            ax2.add_feature(feature.LAND,  zorder=0, color=(.8,.8,.8), edgecolor='black')
+            ax2.gridlines(color=(.9,.9,.9), zorder=1)
+            ax2.scatter(coords[:,1],coords[:,0], color=(1.,.5,0.), marker='o',     s=8,  zorder=2, transform=lonlat)
+            ax2.scatter([stlo],[stla],           color=(1.,.0,0.), marker='o',     s=10, zorder=3, transform=lonlat)
+            ax2.scatter([evlo],[evla],           color=(0.,.0,1.), marker=(5,1,0), s=20, zorder=4, transform=lonlat)
+
             plt.axes(ax)
             count += 1
             nchan += 1
