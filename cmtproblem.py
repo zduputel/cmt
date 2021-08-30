@@ -152,7 +152,7 @@ def ts_hd_misfit(inputs):
     ''' 
     # Get cmtproblem object
     cmtp = inputs[0]
-    cmtp_hd = cmtp.copy() 
+    cmtp_hd = cmtp.copy() # Deepcopy for grid-search in parallel
      
     # Parse search parameters
     if len(inputs)==4:   # Do inversion for a single time-shift
@@ -1628,8 +1628,8 @@ class cmtproblem(object):
         # All done
         return
     
-    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                        derivate=False,zero_trace=True,vertical_force=False,pre_weight=False,ncpu=None):
+    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',
+                        derivate=False,zero_trace=True,vertical_force=False,pre_weight=False,read_from_file=True,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -1668,19 +1668,24 @@ class cmtproblem(object):
             if not pre_weight:
                 sys.stderr.write('Warning: will pre-weight G\n')
 
+        # Check GF dictionary and GF_names
+        if self.gf is None or read_from_file:
+            assert GF_names is not None, 'self.gf dictionary must be populated or GF_names must be specified to proceed with ts_hd_gridsearch'
+
         # Initialize the grid-search
         todo = []
-        if len(hd_search)==1: # Parallelism is done with respect to ts_search
+        if len(hd_search)==1: # Parallelism is done with respect to ts_search (we convolve with STFs for a given half-duration)
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,
-                                filter_btype=filter_btype,derivate=derivate,windowing=False)
+                                filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
             # Todo list
             for i,ts in enumerate(ts_search):
                 todo.append([self,i,ts,constraint])
-        else: # Parallelism is done with respect to hd_search
+
+        else: # Parallelism is done with respect to hd_search (we filter only and do the STF convolutions in parallel)
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
-                                filter_btype=filter_btype,derivate=derivate,windowing=False)
+                                filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
             # Todo list
             for j,hd in enumerate(hd_search):
                 todo.append([self,j,hd,ts_search,constraint])
@@ -1688,6 +1693,8 @@ class cmtproblem(object):
         # Do the grid-search
         pool = Pool(ncpu)
         outputs = pool.map(ts_hd_misfit,todo)
+        pool.terminate()
+        del pool
          
         # Fill out the rms matrices
         rms  = np.zeros((len(ts_search),len(hd_search)))
