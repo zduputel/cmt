@@ -14,7 +14,7 @@ import numpy as np
 import os,sys
 
 # Personals
-from sacpy  import sac
+from sacpy  import Sac
 from .cmt   import cmt
 from .force import force
 
@@ -1060,7 +1060,7 @@ class cmtproblem(object):
                      if len(swwin)==4: Use standard WP_WIN4 definition
                      else: Multiple time windows from P arrival time (Ptt) + swwin[i]*gcarc
             * dcwin: dictionnary of time-windows for individual channels (optional):
-                       channel keys are defined following the format of sacpy.sac.id
+                       channel keys are defined following the format of sacpy.Sac.id
                        For each channel:
                - if wpwin=False: [tbeg,tend] list with respect to origin time
                - if wpwin=True:  [tbeg,tend] with respect to P arrival time
@@ -1085,15 +1085,15 @@ class cmtproblem(object):
             o_lst = open(o_sac_lst,'wt')            
         
         # Get delta (should be identical for all channels)
-        data_sac = sac(ifiles[0])
+        data_sac = Sac(ifiles[0])
         self.delta = data_sac.delta
 
         # Instantiate data dict
         self.data = {}
         self.chan_ids = []
         
-        # Instantiate sacpy.sac
-        data_sac = sac()        
+        # Instantiate sacpy.Sac
+        data_sac = Sac()        
         
         # Instanciate time window dictionary
         self.twin = {}
@@ -2211,7 +2211,7 @@ class cmtproblem(object):
             ax2.add_feature(feature.LAND,  zorder=0, color=(.8,.8,.8), edgecolor='black')
             ax2.gridlines(color=(.9,.9,.9), zorder=1)
             ax2.scatter(coords[:,1],coords[:,0], color=(1.,.5,0.), marker='o',     s=8,  zorder=2, transform=lonlat)
-            ax2.scatter([stlo],[stla],           color=(1.,.0,0.), marker='o',     s=10, zorder=3, transform=lonlat)
+            ax2.scatter([stlo],[stla],           color=(1.,.0,0.), marker='o',     s=16, zorder=3, transform=lonlat)
             ax2.scatter([evlo],[evla],           color=(0.,.0,1.), marker=(5,1,0), s=20, zorder=4, transform=lonlat)
 
             plt.axes(ax)
