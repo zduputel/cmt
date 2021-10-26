@@ -1411,8 +1411,8 @@ class cmtproblem(object):
             * windowing : If True, will time-window the Green's functions
         '''
         
-        # sacpy.sac instantiation
-        gf_sac = sac()
+        # sacpy.Sac instantiation
+        gf_sac = Sac()
         
         # gf dictionary
         if self.gf is None or read_from_file:

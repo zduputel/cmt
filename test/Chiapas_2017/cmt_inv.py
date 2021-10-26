@@ -25,7 +25,7 @@ dobs = cmtp.D
 
 # Build Green GF_names dictionary for each sub-source
 GF_names = []
-s = sacpy.sac()
+s = sacpy.Sac()
 GF_names = {}
 for dkey in cmtp.data:
     GF_names[dkey] = {}
