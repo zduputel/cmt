@@ -1522,18 +1522,18 @@ class cmtproblem(object):
                  
                 # Convolve with STF(s)
                 if stf is not None:
-                    if m in self.cmt.MTnm and triangular_stf: # Convolve with a triangular stf
+                    if triangular_stf and m in self.cmt.MTnm: # Convolve with a triangular stf
                         gf_sac = conv_by_tri_stf(gf_sac,0.,self.cmt.hd)
 
-                    elif m in self.force.Fnm and sinusoidal_stf:
+                    elif sinusoidal_stf and m in self.force.Fnm:
                         gf_sac = conv_by_sin_stf(gf_sac,0.,self.force.hd)
                             
                     elif isinstance(stf,np.ndarray) or isinstance(stf,list): 
-                        gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='same')
+                        gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='full')[:gf_sac.npts]
                         
                     else:
                         assert chan_id in stf, 'No channel id %s in stf'%(chan_id)
-                        gf_sac.depvar=np.convolve(gf_sac.depvar,stf[chan_id],mode='same')
+                        gf_sac.depvar=np.convolve(gf_sac.depvar,stf[chan_id],mode='full')[:gf_sac.npts]
 
                 # Time-shift
                 if isinstance(delay,dict):
