@@ -152,7 +152,7 @@ def ts_hd_misfit(inputs):
     ''' 
     # Get cmtproblem object
     cmtp = inputs[0]
-    cmtp_hd = cmtp.copy() # Deepcopy for grid-search in parallel
+    cmtp_stf = cmtp.copy() # Deepcopy for grid-search in parallel
      
     # Parse search parameters
     if len(inputs)==4:   # Do inversion for a single time-shift
@@ -165,10 +165,10 @@ def ts_hd_misfit(inputs):
     elif len(inputs)==5: # Half-duration grid-search
         start = 0
         j = inputs[1]
-        hd = inputs[2]
+        stf = inputs[2]
         ts_search = inputs[3]
-        # Convolve with a STF of half-duration hd
-        cmtp_hd.preparekernels(delay=0.,stf=hd,read_from_file=False,windowing=False)
+        # Convolve with STF
+        cmtp_stf.preparekernels(delay=0.,stf=stf,read_from_file=False,windowing=False)
         if cmtp.force_flag:
             vertical_force = inputs[4]
         else:
@@ -179,10 +179,10 @@ def ts_hd_misfit(inputs):
     rms  = np.zeros((len(ts_search),))
     rmsn = np.zeros((len(ts_search),))
     for k,ts in enumerate(ts_search):
-        cmtp_ts = cmtp_hd.copy()
+        cmtp_ts = cmtp_stf.copy()
         # Prepare kernels
         cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False)
-        cmtp_ts.buildG(pre_weight=cmtp_hd.pre_weight)
+        cmtp_ts.buildG(pre_weight=cmtp_stf.pre_weight)
         cmtp_ts.cmt.ts = ts
          
         # Invert
@@ -200,7 +200,7 @@ def ts_hd_misfit(inputs):
     if len(inputs)==4:
         return i,ts_search,rms,rmsn
     else:
-        return i,j,ts_search,hd,rms,rmsn
+        return i,j,ts_search,stf,rms,rmsn
 
 def warningconditioning(rank,eigvals,cond_threshold):
     out = sys.stderr
@@ -1626,13 +1626,14 @@ class cmtproblem(object):
         # All done
         return
     
-    def ts_hd_gridsearch(self,ts_search,hd_search,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',
+    def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',
                         derivate=False,zero_trace=True,vertical_force=False,pre_weight=False,read_from_file=True,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
             * ts_search: time-shift values to be explored (list or ndarray)
             * hd_search: half-duration values to be explored (list or ndarray)
+            * stf: moment rate function (optionnal, default=None, can be a single STF in a 1D array or multiple STFs to be explored in a 2D array)
             * GF_names : dictionary of GFs names (see preparekernels)
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
@@ -1646,10 +1647,6 @@ class cmtproblem(object):
         # Number of cores
         if ncpu is None:
             ncpu = cpu_count()
-         
-        # Initialize rms arrays
-        rms  = np.zeros((len(ts_search),len(hd_search)))
-        rmsn = np.zeros((len(ts_search),len(hd_search)))
          
         # constrain (zero_trace or vertical_force)
         constraint = zero_trace
@@ -1672,10 +1669,18 @@ class cmtproblem(object):
 
         # Initialize the grid-search
         todo = []
-        if len(hd_search)==1: # Parallelism is done with respect to ts_search (we convolve with STFs for a given half-duration)
+        singleSTF = False
+        if (len(hd_search)==1 and stf is None) or (stf is not None and len(stf.shape)==1): # Parallelism is done with respect to ts_search (we convolve with STFs for a given half-duration)
+            singleSTF = True
             # Prepare the kernels
-            self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,
-                                filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
+            if stf is not None and len(stf.shape)==1:
+                self.preparekernels(GF_names,delay=0.,stf=stf         ,filter_freq=filter_freq,filter_order=filter_order,
+                                    filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
+            else:
+                assert len(hd_search)==1, "Incorrect size of hd_search"
+                self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,
+                                    filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
+                
             # Todo list
             for i,ts in enumerate(ts_search):
                 todo.append([self,i,ts,constraint])
@@ -1685,8 +1690,12 @@ class cmtproblem(object):
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
                                 filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
             # Todo list
-            for j,hd in enumerate(hd_search):
-                todo.append([self,j,hd,ts_search,constraint])
+            if stf is not None:
+                for j in np.arange(stf.shape[0]):
+                    todo.append([self,j,stf[j,:],ts_search,constraint])
+            else:
+                for j,hd in enumerate(hd_search):
+                    todo.append([self,j,hd,ts_search,constraint])
 
         # Do the grid-search
         pool = Pool(ncpu)
@@ -1695,11 +1704,20 @@ class cmtproblem(object):
         del pool
          
         # Fill out the rms matrices
-        rms  = np.zeros((len(ts_search),len(hd_search)))
-        rmsn = np.zeros((len(ts_search),len(hd_search)))
+        if stf is not None:
+            if len(stf.shape)==1:
+                nstf = 1
+            else:
+                nstf = stf.shape[0]
+            rms  = np.zeros((len(ts_search),nstf))
+            rmsn = np.zeros((len(ts_search),nstf))
+
+        else:
+            rms  = np.zeros((len(ts_search),len(hd_search)))
+            rmsn = np.zeros((len(ts_search),len(hd_search)))
         for output in outputs:
             # Parse outputs
-            if len(hd_search)==1:
+            if singleSTF:
                 j  = 0
                 i  = output[0]
                 r  = output[2]
