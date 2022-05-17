@@ -382,6 +382,27 @@ class cmt(object):
         # All done
         return
 
+    def get_iso(self):
+        '''
+        Get the isotropic part of the moment tensor
+        '''
+        iso = self.copy()
+        iso.MT = np.zeros_like(self.MT)
+        traceMT = (self.MT[0]+self.MT[1]+self.MT[2])
+        for i in range(3):
+            iso.MT[i] = traceMT/3.
+        # All done
+        return iso
+
+    def get_dev(self):
+        '''
+        Get the deviatoric part of the moment tensor
+        '''
+        iso = self.get_iso()
+        dev = self.copy()
+        dev.MT -= iso.MT
+        # All done
+        return dev
 
     def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):
         '''
@@ -424,7 +445,7 @@ class cmt(object):
         ax.imshow(pol)
         ax.set_axis_off()
         #return x,y,r,amp,pol
-
+    
     def copy(self):
         '''
         Returns a copy of the cmt object
