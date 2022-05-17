@@ -161,7 +161,12 @@ def ts_hd_misfit(inputs):
         if cmtp.force_flag:
             vertical_force = inputs[3]
         else:
-            zero_trace = inputs[3]
+            MT = None
+            if type(inputs[3]) == bool:
+                zero_trace = inputs[3]
+            else:
+                zero_trace = False
+                MT = inputs[3]
     elif len(inputs)==5: # Half-duration grid-search
         start = 0
         j = inputs[1]
@@ -172,7 +177,12 @@ def ts_hd_misfit(inputs):
         if cmtp.force_flag:
             vertical_force = inputs[4]
         else:
-            zero_trace = inputs[4]
+            MT = None
+            if type(inputs[4]) == bool:
+                zero_trace = inputs[4]
+            else:
+                zero_trace = False
+                MT = inputs[4]
         
     # Time-shift search
     i = np.arange(start,start+len(ts_search))
@@ -184,13 +194,11 @@ def ts_hd_misfit(inputs):
         cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False)
         cmtp_ts.buildG(pre_weight=cmtp_stf.pre_weight)
         cmtp_ts.cmt.ts = ts
-         
         # Invert
         if cmtp_ts.force_flag:
             cmtp_ts.forceinv(vertical_force=vertical_force)
         else:
-            cmtp_ts.cmtinv(zero_trace=zero_trace)
-         
+            cmtp_ts.cmtinv(zero_trace=zero_trace,MT=MT)
         # Get RMS misfit
         res,nD,nS = cmtp_ts.global_rms
         rms[k] = res/np.sqrt(float(cmtp_ts.D.size))
@@ -356,6 +364,7 @@ class cmtproblem(object):
         
         # All done
         return
+    
 
     def cmtinv(self,zero_trace=True,constrainIC=False,MT=None,scale=1.,rcond=1e-4,ICD=False,get_Cm=False,get_BIC=False,get_AIC=False,
                get_ModelEvidence=False,Cm_ModelEvidence=None,positivity=False):
@@ -363,7 +372,7 @@ class cmtproblem(object):
         Perform CMTinversion (stored in cmtproblem.cmt.MT)
         Args:
             * zero_trace: if True impose zero trace
-            * MT: optional, constrain the focal mechanism (only invert M0)
+            * MT: optional, constrain the focal mechanism (only invert M0), can be an array of focal mechanisms to be explored
             * scale: M0 scale
             * rcond: Cut-off ratio  small singular values (default: 1e-4)
             * ICD: recombine MT components into I, C, D, Mrt, Mrp and Mtp
@@ -378,7 +387,14 @@ class cmtproblem(object):
 
         # Constraints
         if MT is not None: # Fixing the focal mechanism (only invert M0)
-            G = self.G.dot(MT)
+            zero_trace=False
+            if MT.size==6:
+                G = self.G.dot(MT)
+            else: # Grid-search among possible focal mechanisms
+                if MT.shape[0]!=6:
+                    MT = MT.T
+                assert MT.shape[0]==6
+                G = self.G.dot(MT)
         elif zero_trace: # Zero trace
             G = np.empty((self.D.size,5))
             if ICD:
@@ -408,7 +424,26 @@ class cmtproblem(object):
                 m,res = sciopt.nnls(G,self.D)
         else:
             if MT is not None:
-                m = (G.T.dot(self.D))/(G.T.dot(G))
+                if MT.size==6:
+                    m = (G.T.dot(self.D))/(G.T.dot(G))
+                else: # Grid-search among focal mechanisms
+                    #Invert everything at once
+                    M0 = (G.T.dot(self.D))/((G*G).sum(axis=0)) 
+                    # Set negative M0 to 0 
+                    zi = np.where(M0<0.)[0] 
+                    M0[zi] *= 0.
+                    # Scale synthetics and MT by M0
+                    GM0 = G*M0
+                    MT = MT*M0
+                    # Compute residuals
+                    D = self.D.reshape(self.D.size,1).repeat(MT.shape[1],axis=1)
+                    R = D-GM0
+                    rms = np.sqrt((R*R).sum(axis=0)/float(self.D.size))
+                    # Find optimum solution
+                    k = np.argmin(rms)   
+                    m = MT[:,k]          
+                    G = self.G
+                    MT = None
             else:
                 m,res,rank,s = np.linalg.lstsq(G,self.D,rcond=rcond)
                 if rank < G.shape[1]:
@@ -1627,7 +1662,7 @@ class cmtproblem(object):
         return
     
     def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                        derivate=False,zero_trace=True,vertical_force=False,pre_weight=False,read_from_file=True,ncpu=None):
+                        derivate=False,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -1641,6 +1676,7 @@ class cmtproblem(object):
             * derivate (optional): default is False (do not derivate green's functions)
             * zero_trace (optional) : default is True (impose zero trace)
             * vertical_force (optional) : default is False (if True impose vertical force for single force inversion)
+            * MT: optional, constrain the focal mechanism (only invert M0), can be an array of focal mechanisms to be explored
             * ncpu (optional): number of cpus (default is the number of CPUs in the system)
         '''
          
@@ -1648,25 +1684,27 @@ class cmtproblem(object):
         if ncpu is None:
             ncpu = cpu_count()
          
-        # constrain (zero_trace or vertical_force)
+        # constrain (zero_trace, vertical_force or MT)
         constraint = zero_trace
+        if MT is not None:
+            constraint = MT
         if self.force_flag:
-            constraint = vertical_force        
-
+            constraint = vertical_force 
+        
         # Pre-weighting
         if pre_weight and not self.pre_weight: # Update self.pre_weight
             assert self.D is None, 'Inconsistent pre-weighting between G and D'
             self.pre_weight = True
-
+        
         if self.pre_weight: # Check that everything is consistent
             assert self.W is not None, 'Weight matrix self.W not built (use buildCd)'
             if not pre_weight:
                 sys.stderr.write('Warning: will pre-weight G\n')
-
+        
         # Check GF dictionary and GF_names
         if self.gf is None or read_from_file:
             assert GF_names is not None, 'self.gf dictionary must be populated or GF_names must be specified to proceed with ts_hd_gridsearch'
-
+        
         # Initialize the grid-search
         todo = []
         singleSTF = False
@@ -1684,7 +1722,7 @@ class cmtproblem(object):
             # Todo list
             for i,ts in enumerate(ts_search):
                 todo.append([self,i,ts,constraint])
-
+        
         else: # Parallelism is done with respect to hd_search (we filter only and do the STF convolutions in parallel)
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
@@ -1696,7 +1734,6 @@ class cmtproblem(object):
             else:
                 for j,hd in enumerate(hd_search):
                     todo.append([self,j,hd,ts_search,constraint])
-
         # Do the grid-search
         pool = Pool(ncpu)
         outputs = pool.map(ts_hd_misfit,todo)
@@ -1711,7 +1748,7 @@ class cmtproblem(object):
                 nstf = stf.shape[0]
             rms  = np.zeros((len(ts_search),nstf))
             rmsn = np.zeros((len(ts_search),nstf))
-
+        
         else:
             rms  = np.zeros((len(ts_search),len(hd_search)))
             rmsn = np.zeros((len(ts_search),len(hd_search)))
