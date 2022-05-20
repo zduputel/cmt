@@ -386,8 +386,8 @@ class cmt(object):
         '''
         Get the isotropic part of the moment tensor
         Args:
-            - get_M (optional, default: False), Get coordinates
-              of the isotropic part in the 3D source-type space.
+            - get_M (optional, default: False), Get coordinates of the ISO
+              part in the 3D source-type space (Vavrycuk et al., 2015)
         Returns:
             - isotropic part (cmt object) and optinally Miso
         '''
@@ -417,8 +417,8 @@ class cmt(object):
         '''
         Get the Double-Couple part of the tensor
         Args:
-            - get_M (optional, default: False), Get coordinates of the 
-              double-couple part in the 3D source-type space.
+            - get_M (optional, default: False), Get coordinates of the DC
+              part in the 3D source-type space (Vavrycuk et al., 2015)
         Returns:
             - double-couple part (cmt object) and optinally Mdc
         '''
