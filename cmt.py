@@ -382,17 +382,26 @@ class cmt(object):
         # All done
         return
 
-    def get_iso(self):
+    def get_iso(self,get_M=False):
         '''
         Get the isotropic part of the moment tensor
+        Args:
+            - get_M (optional, default: False), Get coordinates
+              of the isotropic part in the 3D source-type space.
+        Returns:
+            - isotropic part (cmt object) and optinally Miso
         '''
         iso = self.copy()
         iso.MT = np.zeros_like(self.MT)
-        traceMT = (self.MT[0]+self.MT[1]+self.MT[2])
+        Miso = (self.MT[0]+self.MT[1]+self.MT[2])/3.
         for i in range(3):
-            iso.MT[i] = traceMT/3.
+            iso.MT[i] = Miso
+
         # All done
-        return iso
+        if get_M:
+            return iso,Miso
+        else:
+            return iso
 
     def get_dev(self):
         '''
@@ -403,6 +412,108 @@ class cmt(object):
         dev.MT -= iso.MT
         # All done
         return dev
+
+    def get_dc(self,get_M=False):
+        '''
+        Get the Double-Couple part of the tensor
+        Args:
+            - get_M (optional, default: False), Get coordinates of the 
+              double-couple part in the 3D source-type space.
+        Returns:
+            - double-couple part (cmt object) and optinally Mdc
+        '''
+        ## Remove the isotropic component 
+        dc = self.copy()
+
+        # Get the moment tensor in matrix format
+        MT = dc.fullMT()
+
+        # Compute eigenvalues/eigenvectors and sort them
+        [di,vi] = np.linalg.eig(MT)
+        i  = np.argsort(di)[::-1]
+        di = di[i]
+        vi = vi[:,i]
+
+        # Remove middle eigenvalue
+        #didc = np.array([di[0],0.,di[2]])
+        Mdc=0.5*(di[0]-di[2]-np.abs(di[0]+di[2]-2*di[1])) 
+        didc=np.array([Mdc,0,-Mdc])
+
+        # Get the corresponding DC MT
+        MTdc = vi.dot(np.diag(didc)).dot(vi.T)
+        dc.set_MT(MTdc,fullMT=True)
+
+        # All done
+        if get_M:
+            return dc,Mdc
+        else:
+            return dc
+
+
+    def get_clvd(self,get_M=False):
+        '''
+        Get the CLVD part of the moment tensor
+        Args:
+            - get_M (optional, default: False), Get coordinates of the CLVD 
+              part in the 3D source-type space (Vavrycuk et al., 2015)
+        Returns:
+            - CLVD part (cmt object) and optinally Mclvd
+        '''
+        # Remove the isotropic component 
+        clvd = self.copy()
+
+        # Get the moment tensor in matrix format
+        MT = clvd.fullMT()
+
+        # Remove the double-couple component
+        [di,vi] = np.linalg.eig(MT)
+        i  = np.argsort(di)[::-1]
+        di = di[i]
+        vi = vi[:,i]
+        
+        # CLVD
+        Mclvd = 2./3. * (di[0]+di[2]-2*di[1])
+        if Mclvd>0.:
+            diclvd = np.array([2.*Mclvd,-Mclvd,-Mclvd])
+        else:
+            diclvd = np.array([Mclvd,Mclvd,-2.*Mclvd])
+    
+        # Get the corresponding DC MT
+        MTclvd = vi.dot(np.diag(diclvd)).dot(vi.T)
+        clvd.set_MT(MTclvd,fullMT=True)
+
+        # All done
+        if get_M:
+            return clvd,Mclvd
+        else:
+            return clvd
+
+    def get_best_dc(self):
+        '''
+        Get the best Double-Couple solution
+        '''
+        ## Remove the isotropic component 
+        dc = self.get_dev()
+
+        # Get the moment tensor in matrix format
+        MT = dc.fullMT()
+
+        # Compute eigenvalues/eigenvectors and sort them
+        [di,vi] = np.linalg.eig(MT)
+        i  = np.argsort(di)[::-1]
+        di = di[i]
+        vi = vi[:,i]
+
+        # Remove middle eigenvalue
+        Mdc = (np.abs(di[0])-np.abs(di[2]))/2.
+        didc = np.array([Mdc,0.,-Mdc])
+
+        # Get the corresponding DC MT
+        MTdc = vi.dot(np.diag(didc)).dot(vi.T)
+        dc.set_MT(MTdc,fullMT=True)
+
+        # All done
+        return dc
 
     def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):
         '''
