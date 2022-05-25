@@ -96,6 +96,13 @@ class cmt(object):
         
     def rcmtfile(self,cmtfil,scale=1.):
         '''
+        Deprecated, use cmt.read instead
+        '''
+        self.read(cmftil,scale=1.)
+        # All done
+
+    def read(self,cmtfil,scale=1.):
+        '''
         Reads CMTSOLUTION file
         Args:
            * cmtfil: CMTSOLUTION filename
@@ -191,6 +198,13 @@ class cmt(object):
         
     def wcmtfile(self,cmtfil,scale=1.):
         '''
+        Deprecated, use cmt.write instead
+        '''
+        self.write(cmtfil,scale=scale)
+        # All done
+
+    def write(self,cmtfil,scale=1.):
+        '''
         Writes CMTSOLUTION file
         Args:
            * cmtfil: CMTSOLUTION filename
@@ -209,7 +223,6 @@ class cmt(object):
         fid.close()
         # All done
 
-        
     def M0(self):
         '''
         Calculate M0 (using Dahlen and Tromp convention)
@@ -251,7 +264,8 @@ class cmt(object):
         TM[1,2] = self.MT[5]
         TM[1,0] = TM[0,1]
         TM[2,0] = TM[0,2]
-        TM[2,1] = TM[1,2]
+        TM[2,1] = TM[1,2]       # All done
+
 
         # All done
         return TM
