@@ -98,7 +98,7 @@ class cmt(object):
         '''
         Deprecated, use cmt.read instead
         '''
-        self.read(cmftil,scale=1.)
+        self.read(cmtfil,scale=scale)
         # All done
 
     def read(self,cmtfil,scale=1.):
