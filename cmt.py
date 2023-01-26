@@ -396,6 +396,61 @@ class cmt(object):
         # All done
         return
 
+    def crack2MT(self,lam,mu,theta,phi,M0=None,dV=None):
+        '''
+        Compute moment tensor for given crack parameters (not fully tested)
+        (following Kumagai, Source Quantification of Volc. Signals)
+        Args:
+            * lam,mu : lamé parameters 
+            * theta  : Dip of the crack
+            * phi    : Strike of the crack
+            One of the two following params should be provided
+            * M0     : Scalar moment (optional, Dahlen's definition)
+            * dV     : Incremental volume change of crack (optional)
+        Note:
+            eigenvalue ratio 1:1:(lam+2mu)/lam
+            * if lam=mu  -> 1:1:3
+            * if lam=2mu -> 1:1:2
+        '''
+
+        # Check if dV or M0 is provided
+        if M0 is not None:
+            S = np.sqrt(2*lam*lam+(lam+2*mu)**2)/np.sqrt(2)
+            dV = M0/S
+        else:
+            assert dV is not None, 'M0 or dV should be provided' 
+
+        # Scaling factor
+        muDV = mu*dV
+
+        # Lamda/Mu ratio
+        R = lam/mu
+
+        # Sin/Cos
+        phi = np.deg2rad(phi-90.) # Az of the normal pointing downward
+        theta = np.deg2rad(theta)
+        sinP  = np.sin(phi)
+        sinP2 = sinP*sinP
+        cosP  = np.cos(phi)
+        cosP2 = cosP*cosP
+        sinT  = np.sin(theta)
+        sinT2 = sinT*sinT
+        cosT  = np.cos(theta)
+        cosT2 = cosT*cosT
+        
+        # MT
+        if self.MT is None:
+            self.MT = np.zeros((6,))
+        self.MT[0] = muDV * (R + 2*cosT2)
+        self.MT[1] = muDV * (R + 2*sinT2*cosP2)
+        self.MT[2] = muDV * (R + 2*sinT2*sinP2)
+        self.MT[3] = muDV * (2*sinT*cosT*cosP)
+        self.MT[4] =-muDV * (2*sinT*cosT*sinP)
+        self.MT[5] =-muDV * (2*sinT2*sinP*cosP)
+
+        # All done
+        return
+
     def get_iso(self,get_M=False):
         '''
         Get the isotropic part of the moment tensor
