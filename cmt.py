@@ -333,12 +333,10 @@ class cmt(object):
         # All done
         return strike,dip,rake
 
-    
-    def nodalplanes(self):
+    def get_eig(self):
         '''
-        Returns strike, dip, rake of each plane
+        Return sorted eigenvalues and eigenvectors
         '''
-
         # Get the full moment tensor
         MT = self.fullMT()
 
@@ -347,6 +345,37 @@ class cmt(object):
         i  = np.argsort(di)[::-1]
         di = di[i]
         vi = vi[:,i]
+        
+        # All done
+        return di,vi
+
+    def principal_axes(self):
+        '''
+        Returns Principal Axes Values, Plunges and Azimuths
+        '''
+        # Get sorted eigenvalues and eigenvectors
+        [di,vi]=self.get_eig()
+        
+        # Principal axes
+        azm = np.rad2deg(np.arctan2(vi[2,:],-vi[1,:])) 
+        scale = np.sqrt(vi[1,:]*vi[1,:] + vi[2,:]*vi[2,:])
+        plg = np.rad2deg(np.arctan2(-vi[0,:],scale))
+        i = np.where(plg<0.)[0]
+        plg[i] *= -1.
+        azm[i] += 180.
+        azm=np.fmod(azm,360.)
+        i = np.where(azm<0.)
+        azm[i] += 360.
+        
+        # All done
+        return di, plg, azm
+    
+    def nodalplanes(self):
+        '''
+        Returns strike, dip, rake of each plane
+        '''
+        # Get sorted eigenvalues and eigenvectors
+        [di,vi]=self.get_eig()
 
         # Normal/Slip vectors
         v1 = (vi[:,0] + vi[:,2])/np.sqrt(2.)
