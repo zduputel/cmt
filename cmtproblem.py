@@ -1149,6 +1149,7 @@ class cmtproblem(object):
             
             # Read sac file            
             data_sac.read(ifile)
+            chan_id = data_sac.id
             assert np.round(data_sac.delta,3)==np.round(self.delta,3), 'All waveforms should have the same sampling rate (%.3f vs %.3f)'%(data_sac.delta,self.delta)
             
             # Filter
@@ -1174,7 +1175,6 @@ class cmtproblem(object):
                 data_sac.wsac(ofile)
                 
             # Time-window
-            chan_id = data_sac.id
             if wpwin:
                 assert data_sac.gcarc >= 0., 'gcarc must be assigned in sac data header'
                 tbeg = data_sac.t[0]-data_sac.o
