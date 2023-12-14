@@ -613,7 +613,7 @@ class cmt(object):
         # All done
         return dc
 
-    def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None):
+    def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None,alpha=1):
         '''
         Compute mechanism
         Args:
@@ -651,7 +651,7 @@ class cmt(object):
             import matplotlib.pyplot as plt
             fig = plt.figure()
             ax  = fig.add_subplot(111)
-        ax.imshow(pol)
+        ax.imshow(pol,alpha=alpha)
         ax.set_axis_off()
         #return x,y,r,amp,pol
     
