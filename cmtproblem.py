@@ -1074,8 +1074,8 @@ class cmtproblem(object):
         # All done
         return 
         
-    def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',wpwin=False,
-                    swwin=None,dcwin={},taper_width=None,derivate=False,o_dir=None,o_sac_lst=None):
+    def preparedata(self,i_sac_lst,filter_freq=None,filter_order=4,filter_btype='bandpass',filter_passes=1,
+                    wpwin=False, swwin=None,dcwin={},taper_width=None,derivate=False,o_dir=None,o_sac_lst=None):
         '''
         Prepare Data before cmt inversion
         Args:
@@ -1085,6 +1085,7 @@ class cmtproblem(object):
                                       to use different passband for different channels
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
+            * filter_passes (optional): default is 1 (see sacpy.filter)
             * wpwin: if True, use W-phase window
             * swwin: surface wave windowing (optional):
                - if wpwin=False: Surface wave type windowing
@@ -1155,14 +1156,14 @@ class cmtproblem(object):
             # Filter
             if filter_freq is not None:
                 if isinstance(filter_freq,np.ndarray) or isinstance(filter_freq,list):
-                    data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
+                    data_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype,passes=filter_passes)                
                 else:
                     assert isinstance(filter_freq,dict), 'Incorrect format for filter_freq'
                     if chan_id in filter_freq:
                         freqs = filter_freq[chan_id]
                     else:
                         freqs = filter_freq['default']
-                    data_sac.filter(freq=freqs,order=filter_order,btype=filter_btype)
+                    data_sac.filter(freq=freqs,order=filter_order,btype=filter_btype,passes=filter_passes)
 
             # Differentiate
             if derivate:
@@ -1424,7 +1425,7 @@ class cmtproblem(object):
         return
 
     def preparekernels(self,GF_names=None,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
-                       baseline=0,left_taper=False,wpwin=False,derivate=False,scale=1.,read_from_file=True,
+                       filter_passes=1,baseline=0,left_taper=False,wpwin=False,derivate=False,scale=1.,read_from_file=True,
                        windowing=True):
         '''
         Prepare Green's functions (stored in self.gf dictionary as sacpy instances)
@@ -1450,6 +1451,7 @@ class cmtproblem(object):
                                       to use different passband for different channels
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter)
+            * filter_passes (optional): default is 1 (see sacpy.filter)
             * baseline : number of samples to remove baseline (default: no baseline)
             * left_taper: if True, apply left taper over baseline (optional)
             * wpwin: Deprecated
@@ -1602,14 +1604,14 @@ class cmtproblem(object):
                 # Filter
                 if filter_freq is not None:
                     if isinstance(filter_freq,np.ndarray) or isinstance(filter_freq,list):
-                        gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype)                
+                        gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype,passes=filter_passes) 
                     else:
                         assert isinstance(filter_freq,dict), 'Incorrect format for filter_freq'
                         if chan_id in filter_freq:
                             freqs = filter_freq[chan_id]
                         else:
                             freqs = filter_freq['default']
-                        gf_sac.filter(freq=freqs,order=filter_order,btype=filter_btype)
+                        gf_sac.filter(freq=freqs,order=filter_order,btype=filter_btype,passes=filter_passes)
 
                 if derivate:
                     gf_sac.derivate()            
@@ -1676,7 +1678,7 @@ class cmtproblem(object):
         # All done
         return
     
-    def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',
+    def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',filter_passes=1,
                         derivate=False,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
@@ -1688,6 +1690,7 @@ class cmtproblem(object):
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter) 
+            * filter_passes (optional): default is 1 (see sacpy.filter)
             * derivate (optional): default is False (do not derivate green's functions)
             * zero_trace (optional) : default is True (impose zero trace)
             * vertical_force (optional) : default is False (if True impose vertical force for single force inversion)
@@ -1727,12 +1730,12 @@ class cmtproblem(object):
             singleSTF = True
             # Prepare the kernels
             if stf is not None and len(stf.shape)==1:
-                self.preparekernels(GF_names,delay=0.,stf=stf         ,filter_freq=filter_freq,filter_order=filter_order,
-                                    filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
+                self.preparekernels(GF_names,delay=0.,stf=stf ,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
+                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,windowing=False)
             else:
                 assert len(hd_search)==1, "Incorrect size of hd_search"
-                self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,
-                                    filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
+                self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
+                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,windowing=False)
                 
             # Todo list
             for i,ts in enumerate(ts_search):
@@ -1740,8 +1743,8 @@ class cmtproblem(object):
         
         else: # Parallelism is done with respect to hd_search (we filter only and do the STF convolutions in parallel)
             # Prepare the kernels
-            self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,
-                                filter_btype=filter_btype,derivate=derivate,read_from_file=read_from_file,windowing=False)
+            self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
+                                filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,windowing=False)
             # Todo list
             if stf is not None:
                 for j in np.arange(stf.shape[0]):
