@@ -5,13 +5,14 @@ Written by Z. Duputel and L. Rivera, May 2015
 '''
 
 # Externals
+import os,sys
+import numpy as np
 from scipy import signal
 from scipy import linalg
 import scipy.optimize as sciopt
+import pyproj as pp
 from copy  import deepcopy
 from multiprocessing import Pool, cpu_count
-import numpy as np
-import os,sys
 
 # Personals
 from sacpy  import Sac
@@ -361,6 +362,12 @@ class cmtproblem(object):
         self.taper_n     = None  # Taper width 
         self.taper_left  = None  # Taper (left part)
         self.taper_right = None  # Taper (right part)
+
+        # Grn id map
+        self.grn_id  = None 
+        self.grn_lon = None 
+        self.grn_lat = None 
+        self.grn_dep = None 
         
         # All done
         return
@@ -1423,6 +1430,93 @@ class cmtproblem(object):
             
         # All done
         return
+    
+    def prepareGrnMapOpenSWPC(self,GF_lst_file):
+        '''
+        Prepare map between Green's functions ID and Green's function location
+        '''
+        self.grn_id  = []
+        self.grn_lon = []
+        self.grn_lat = []
+        self.grn_dep = []
+        f=open(GF_lst_file,'rt')
+        for l in f:
+            items = l.strip().split()
+            self.grn_lon.append(float(items[0]))
+            self.grn_lat.append(float(items[1]))
+            self.grn_dep.append(float(items[2]))
+            self.grn_id.append(int(items[3]))
+        f.close()
+        self.grn_id  = np.array(self.grn_id)
+        self.grn_lat = np.array(self.grn_lat)
+        self.grn_lon = np.array(self.grn_lon)
+        self.grn_dep = np.array(self.grn_dep)
+    
+    def getGFnamesOpenSWPC(self,GF_dir,GF_lst_file=None,dist_threshold=1.,check_files=False):
+        '''
+        Prepare Green's functions names dictionary from self.data
+        Will be structured as follows:
+                GF_names = {'channel_id1': {'MTcmp': gf_sac_file_name, ...}, ...}
+                where:
+                    - channel_id1 is the channel id in the sacpy format "knetwk_kstnm_khole_kcmpnm"
+                    -  indicates the moment tensor component (i.e., 'rr', 'tt', 'pp', 'rt', 'rp', 'tp')
+        Args:
+            * GF_dir: directory where the Green's functions are stored
+            * dist_threshold: maximum distance to look for a Green's function
+        '''
+        # Check inputs
+        assert self.data is not None, 'Data must be prepared before using GFnamesFromData'
+        assert os.path.exists(GF_dir), 'GF_dir does not exist'
+
+        # Get/Check Green's functions list
+        if GF_lst_file is not None:
+            self.prepareGrnMapOpenSWPC(GF_lst_file)
+        assert self.grn_id is not None, 'grn_id must be prepared before using GFnamesFromData'
+        assert self.grn_lat is not None, 'grn_lat map must be prepared before using GFnamesFromData'
+        assert self.grn_lon is not None, 'grn_lon must be prepared before using GFnamesFromData'
+        assert self.grn_dep is not None, 'grn_id map must be prepared before using GFnamesFromData'
+
+        # Find closest Green's function
+        g = pp.Geod(ellps='WGS84')
+        az, baz, dist = g.inv([self.cmt.lon]*len(self.grn_lon),[self.cmt.lat]*len(self.grn_lat),self.grn_lon,self.grn_lat)
+        dist *= 0.001 # Convert to km
+        dist = np.sqrt(dist*dist + (self.grn_dep-self.cmt.dep)*(self.grn_dep-self.cmt.dep))
+        igrn = np.argmin(dist)
+        assert dist[igrn] < dist_threshold, 'No Green function found within %.2f km (min dist = %.2f km)'%(dist_threshold,dist[igrn])
+
+        # Moment-tensor/Force components
+        nms = []
+        if self.cmt_flag:
+            nms += self.cmt.MTnm
+        if self.force_flag:
+            nms += self.force.Fnm
+
+        # Instantiate Green's functions names dictionary
+        GF_names = {}
+        # Loop over channel ids
+        grn_count = 0
+        for chan_id in self.data:
+            kstnm = self.data[chan_id].kstnm
+            kcmpnm = self.data[chan_id].kcmpnm[-1]
+            assert kcmpnm in ['Z','N','E'], 'Incorrect kcmpnm in %s'%(chan_id)
+            GF_names[chan_id] = {}
+            for c in self.cmt.MTnm :
+                # Moment tensor component
+                MTc=c.upper()
+                # ReadGFs and convert it to Harvard convention (r, theta, phi)
+                GF_names[chan_id][c] = os.path.join(GF_dir,'%s/%s/swpc__%08d__%s__%s__%s__.sac'%(kstnm,MTc,self.grn_id[igrn],kstnm,kcmpnm,MTc))
+                # Count missing
+                if check_files:
+                    if not os.path.exists(GF_names[chan_id][c]):
+                        sys.stderr.write('Missing Green function: %s\n'%(GF_names[chan_id][c]))
+                        continue
+                    grn_count += 1
+        
+        # All done
+        if check_files:
+            return GF_names, grn_count
+        else:
+            return GF_names
 
     def preparekernels(self,GF_names=None,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
                        filter_passes=1,baseline=0,left_taper=False,wpwin=False,derivate=False,scale=1.,read_from_file=True,
