@@ -191,7 +191,7 @@ def ts_hd_misfit(inputs):
     for k,ts in enumerate(ts_search):
         cmtp_ts = cmtp_stf.copy()
         # Prepare kernels
-        cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False)
+        cmtp_ts.preparekernels(delay=ts,stf=None,read_from_file=False,windowing=True)
         cmtp_ts.buildG(pre_weight=cmtp_stf.pre_weight)
         cmtp_ts.cmt.ts = ts
         # Invert
@@ -1426,7 +1426,7 @@ class cmtproblem(object):
 
     def preparekernels(self,GF_names=None,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
                        filter_passes=1,baseline=0,left_taper=False,wpwin=False,derivate=False,scale=1.,read_from_file=True,
-                       windowing=True):
+                       npts_padding=None, windowing=True):
         '''
         Prepare Green's functions (stored in self.gf dictionary as sacpy instances)
         Args:
@@ -1459,7 +1459,8 @@ class cmtproblem(object):
             * scale: scaling factor for all GFs (optional)
             * read_from_file: option to read the GF database
                 - if True, load the Green's functions from the sac files in the GF database
-                - if False, use the Green's functions that were previously stored in self.gf                        
+                - if False, use the Green's functions that were previously stored in self.gf   
+            * npts_padding: number of points to pad the Green's functions (optional)                     
             * windowing : If True, will time-window the Green's functions
         '''
         
@@ -1547,7 +1548,7 @@ class cmtproblem(object):
             for m in nms:
 
                 # Read Green's functions
-                if read_GF: # Read GF sac file
+                if read_GF: # Read GF sac files
                     gf_sac.read(GF_names[chan_id][m])
                 else:       # Get GF from the self.gf dictionary
                     gf_sac = self.gf[chan_id][m].copy()
@@ -1572,6 +1573,15 @@ class cmtproblem(object):
                 # Scale GFs
                 gf_sac.depvar *= scale
                  
+                # Padding to npts padding
+                if npts_padding is not None and gf_sac.depvar.size < npts_padding:
+                    assert type(npts_padding)==int, 'npts_padding must be an integer'
+                    depvar = np.zeros((npts_padding),) 
+                    depvar[:gf_sac.depvar.size] = gf_sac.depvar
+                    depvar[gf_sac.depvar.size:] = depvar[gf_sac.depvar.size-1]
+                    gf_sac.depvar = depvar
+                    gf_sac.npts = npts_padding
+                    
                 # Convolve with STF(s)
                 if stf is not None:
                     if triangular_stf and m in self.cmt.MTnm: # Convolve with a triangular stf
@@ -1679,7 +1689,7 @@ class cmtproblem(object):
         return
     
     def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',filter_passes=1,
-                        derivate=False,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,ncpu=None):
+                        derivate=False,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,npts_padding=None,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -1731,11 +1741,11 @@ class cmtproblem(object):
             # Prepare the kernels
             if stf is not None and len(stf.shape)==1:
                 self.preparekernels(GF_names,delay=0.,stf=stf ,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
-                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,windowing=False)
+                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
             else:
                 assert len(hd_search)==1, "Incorrect size of hd_search"
                 self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
-                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,windowing=False)
+                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
                 
             # Todo list
             for i,ts in enumerate(ts_search):
@@ -1744,7 +1754,7 @@ class cmtproblem(object):
         else: # Parallelism is done with respect to hd_search (we filter only and do the STF convolutions in parallel)
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
-                                filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,windowing=False)
+                                filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
             # Todo list
             if stf is not None:
                 for j in np.arange(stf.shape[0]):
