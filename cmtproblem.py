@@ -1482,7 +1482,7 @@ class cmtproblem(object):
         dist *= 0.001 # Convert to km
         dist = np.sqrt(dist*dist + (self.grn_dep-self.cmt.dep)*(self.grn_dep-self.cmt.dep))
         igrn = np.argmin(dist)
-        assert dist[igrn] < dist_threshold, 'No Green function found within %.2f km (min dist = %.2f km)'%(dist_threshold,dist[igrn])
+        assert dist[igrn] < dist_threshold, 'No Green function found within %.4f km (min dist = %.4f km)'%(dist_threshold,dist[igrn])
 
         # Moment-tensor/Force components
         nms = []
