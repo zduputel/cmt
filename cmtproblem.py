@@ -971,7 +971,7 @@ class cmtproblem(object):
         Build Data covariance a pre-weighting matrix 
         Args:
             * sigma_d: float or dict[chan_id] of standard deviations
-            * noise_level: noise level (fraction of max amplitudes)
+            * noise_level: noise level (fraction of absolute maximum amplitudes)
             * tcor: correlation length (in samples)
             * Cp: Dictionary of Cp (one entry per channel)
         '''
