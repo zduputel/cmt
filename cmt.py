@@ -613,12 +613,13 @@ class cmt(object):
         # All done
         return dc
 
-    def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None,alpha=1):
+    def plot(self,npx=250,colors=[[1.,0.,0.],[1.,1.,1.]],ax=None,alpha=1,plotmeca=True):
         '''
         Compute mechanism
         Args:
            * npx: number of points
            * colors: RGB colors for compressional and tensional quadrants
+           * plotmeca: if True will plot the mechanism, otherwise, will return polarities
         '''
         
         # Mecanism
@@ -647,12 +648,15 @@ class cmt(object):
         pol[i3,j3] = [1.,1.,1.]
         pol=np.ma.masked_where(pol>=2.,pol)[::-1,:]
         
-        if ax is None:
-            import matplotlib.pyplot as plt
-            fig = plt.figure()
-            ax  = fig.add_subplot(111)
-        ax.imshow(pol,alpha=alpha)
-        ax.set_axis_off()
+        if plotmeca == True:
+            if ax is None:
+                import matplotlib.pyplot as plt
+                fig = plt.figure()
+                ax  = fig.add_subplot(111)
+            ax.imshow(pol,alpha=alpha)
+            ax.set_axis_off()
+        else:
+            return pol
         #return x,y,r,amp,pol
     
     def copy(self):
