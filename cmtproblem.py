@@ -1482,7 +1482,8 @@ class cmtproblem(object):
         dist *= 0.001 # Convert to km
         dist = np.sqrt(dist*dist + (self.grn_dep-self.cmt.dep)*(self.grn_dep-self.cmt.dep))
         igrn = np.argmin(dist)
-        assert dist[igrn] < dist_threshold, 'No Green function found within %.4f km (min dist = %.4f km)'%(dist_threshold,dist[igrn])
+        assert dist[igrn] < dist_threshold, 'No Green function found within %.4f km (min dist = %.4f km) for CMT location (lon=%.4f, lat=%.4f, dep=%.4f) and Green function location (lon=%.4f, lat=%.4f, dep=%.4f)' % (
+            dist_threshold, dist[igrn], self.cmt.lon, self.cmt.lat, self.cmt.dep, self.grn_lon[igrn], self.grn_lat[igrn], self.grn_dep[igrn])
 
         # Moment-tensor/Force components
         nms = []
@@ -1769,7 +1770,7 @@ class cmtproblem(object):
                             gf_sac.depvar = np.append(np.zeros((-ib,)),gf_sac.depvar)
                             ib = 0
                         assert ib>=0, 'Incomplete GF (ie<0) for %s'%(chan_id)
-                        assert ie<=gf_sac.npts,'Incomplete GF (ie>npts) for %s'%(chan_id)
+                        assert ie<=gf_sac.npts,'Incomplete GF (ie=%d>npts=%d) for %s'%(ie,gf_sac.npts,chan_id)
                         gf_sac.depvar = gf_sac.depvar[ib:ib+npts]
                         if self.taper:
                             gf_sac.depvar[:self.taper_n]  *= self.taper_left
@@ -1783,7 +1784,7 @@ class cmtproblem(object):
         return
     
     def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',filter_passes=1,
-                        derivate=False,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,npts_padding=None,ncpu=None):
+                        derivate=False,scale=1.,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,npts_padding=None,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
         Args:
@@ -1835,11 +1836,11 @@ class cmtproblem(object):
             # Prepare the kernels
             if stf is not None and len(stf.shape)==1:
                 self.preparekernels(GF_names,delay=0.,stf=stf ,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
-                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
+                                    filter_passes=filter_passes,derivate=derivate,scale=scale,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
             else:
                 assert len(hd_search)==1, "Incorrect size of hd_search"
                 self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
-                                    filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
+                                    filter_passes=filter_passes,derivate=derivate,scale=scale,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
                 
             # Todo list
             for i,ts in enumerate(ts_search):
@@ -1848,7 +1849,7 @@ class cmtproblem(object):
         else: # Parallelism is done with respect to hd_search (we filter only and do the STF convolutions in parallel)
             # Prepare the kernels
             self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
-                                filter_passes=filter_passes,derivate=derivate,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
+                                filter_passes=filter_passes,derivate=derivate,scale=scale,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
             # Todo list
             if stf is not None:
                 for j in np.arange(stf.shape[0]):
