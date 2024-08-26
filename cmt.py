@@ -114,7 +114,7 @@ class cmt(object):
         self.hd    = float(L[3].strip().split(':')[1])
         self.lat   = float(L[4].strip().split(':')[1])
         self.lon   = float(L[5].strip().split(':')[1])
-        self.dep   = float(L[6].strip().split(':')[1])        
+        self.dep   = float(L[6].strip().split(':')[1])
         if len(L)>=13:
             self.MT = np.zeros((6,))
             for i in range(6):
@@ -236,11 +236,11 @@ class cmt(object):
         return M0
 
     
-    def Mw(self):
+    def Mw(self,scale=1.):
         '''
         Calculate Mw
         '''
-        M0 = self.M0()
+        M0 = self.M0()*scale
         Mw = 2./3.*(np.log10(M0)-16.1)
         # All done        
         return Mw
