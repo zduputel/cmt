@@ -1452,7 +1452,7 @@ class cmtproblem(object):
         self.grn_lon = np.array(self.grn_lon)
         self.grn_dep = np.array(self.grn_dep)
     
-    def getGFnamesOpenSWPC(self,GF_dir,GF_lst_file=None,dist_threshold=1.,check_files=False):
+    def getGFnamesOpenSWPC(self,GF_dir,GF_lst_file=None,dist_threshold=1.,tilt_corrections=False,check_files=False):
         '''
         Prepare Green's functions names dictionary from self.data
         Will be structured as follows:
@@ -1493,7 +1493,9 @@ class cmtproblem(object):
             nms += self.force.Fnm
 
         # Instantiate Green's functions names dictionary
-        GF_names = {}
+        GF_names  = {}
+        if tilt_corrections:
+            GFt_names = {} # Tilt corrections
         # Loop over channel ids
         grn_count = 0
         for chan_id in self.data:
@@ -1501,11 +1503,15 @@ class cmtproblem(object):
             kcmpnm = self.data[chan_id].kcmpnm[-1]
             assert kcmpnm in ['Z','N','E'], 'Incorrect kcmpnm in %s'%(chan_id)
             GF_names[chan_id] = {}
-            for c in self.cmt.MTnm :
+            if tilt_corrections:
+                GFt_names[chan_id] = {}
+            for c in nms:
                 # Moment tensor component
                 MTc=c.upper()
                 # ReadGFs and convert it to Harvard convention (r, theta, phi)
                 GF_names[chan_id][c] = os.path.join(GF_dir,'%s/%s/swpc__%08d__%s__%s__%s__.sac'%(kstnm,MTc,self.grn_id[igrn],kstnm,kcmpnm,MTc))
+                if tilt_corrections and kcmpnm != 'Z': # Tilt corrections for horizontal components 
+                    GFt_names[chan_id][c] = os.path.join(GF_dir,'%s/%s/swpc__%08d__%s__d%s__%s__.sac'%(kstnm,MTc,self.grn_id[igrn],kstnm,kcmpnm,MTc))
                 # Count missing
                 if check_files:
                     if not os.path.exists(GF_names[chan_id][c]):
@@ -1515,11 +1521,17 @@ class cmtproblem(object):
         
         # All done
         if check_files:
-            return GF_names, grn_count
+            if tilt_corrections:
+                return GF_names, GFt_names, grn_count
+            else:
+                return GF_names, grn_count
         else:
-            return GF_names
+            if tilt_corrections:
+                return GF_names, GFt_names
+            else:
+                return GF_names
 
-    def preparekernels(self,GF_names=None,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
+    def preparekernels(self,GF_names=None,GFt_names=None,stf=None,delay=0.,filter_freq=None,filter_order=4,filter_btype='bandpass',
                        filter_passes=1,baseline=0,left_taper=False,wpwin=False,derivate=False,scale=1.,read_from_file=True,
                        npts_padding=None, windowing=True):
         '''
@@ -1531,6 +1543,9 @@ class cmtproblem(object):
                 where:
                     - channel_id1 is the channel id in the sacpy format "knetwk_kstnm_khole_kcmpnm"
                     -  indicates the moment tensor component (i.e., 'rr', 'tt', 'pp', 'rt', 'rp', 'tp')
+            * GFt_names : dictionary of tilt-corrected GFs names (i.e., path to sac files)
+                Must be structured as follows:
+                GFt_names = {'channel_id1': {'MTcmp': gft_sac_file_name, ...}, ...} dE, dN channels only
             * stf : moment rate function (optionnal, default=None)
                 - can be a scalar giving a triangular (cmt) or sinusoidal (force) STF half-duration
                 - can be a list or array of len==2 with triangular and sinusoidal hald-furation when 
@@ -1561,6 +1576,8 @@ class cmtproblem(object):
         
         # sacpy.Sac instantiation
         gf_sac = Sac()
+        if GFt_names is not None:
+            gft_sac = Sac()
         
         # gf dictionary
         if self.gf is None or read_from_file:
@@ -1598,7 +1615,7 @@ class cmtproblem(object):
                     self.cmt.hd    = float(stf[0])
                     self.force.hd  = float(stf[1])
                 else:               # half duration is half the len of stf
-                    self.cmt.hd = (len(stf)-1)*0.5
+                    self.cmt.hd = (len(stf)-1)*0.5 # Here pb if delta!=1
                     if self.force_flag:
                         self.force.hd = (len(stf)-1)*0.5
                         
@@ -1633,6 +1650,11 @@ class cmtproblem(object):
                 self.gf[chan_id] = {}
                 assert chan_id in GF_names, 'missing channel id (%s)'%(chan_id)
                 read_GF = True
+            
+            # Tilt corrections only applied when GFs are read from file
+            tilt_corr = read_GF and GFt_names is not None and chan_id[-1] != 'Z'
+            if GFt_names is not None and not read_GF:
+                sys.stderr.write('Warning: GFt_names ignored for %s (GFs taken from self.gf, tilt corrections assumed already applied)\n'%(chan_id)) 
 
             # Loop over moment-tensor/force components
             nms = []
@@ -1645,6 +1667,15 @@ class cmtproblem(object):
                 # Read Green's functions
                 if read_GF: # Read GF sac files
                     gf_sac.read(GF_names[chan_id][m])
+                    if tilt_corr:
+                        # Read tilt-corrected GFs
+                        assert chan_id in GFt_names, 'No channel id %s in GFt_names'%(chan_id)
+                        assert m in GFt_names[chan_id], 'No moment tensor/force component %s in GFt_names (id=%s)'%(m,chan_id)
+                        gft_sac.read(GFt_names[chan_id][m])
+                        # Right Taper the end of the tilt-corrected GFs
+                        taper_len = int(0.1*gft_sac.npts)
+                        ang = np.pi / taper_len
+                        gft_sac.depvar[-taper_len:] *= 0.5*(1.+np.cos(ang*np.arange(taper_len)))
                 else:       # Get GF from the self.gf dictionary
                     gf_sac = self.gf[chan_id][m].copy()
                  
@@ -1667,6 +1698,24 @@ class cmtproblem(object):
                  
                 # Scale GFs
                 gf_sac.depvar *= scale
+                if tilt_corr:
+                    gft_sac.depvar *= scale
+
+                # Filter before padding (to avoid padding artifacts)
+                if npts_padding is not None and filter_freq is not None:
+                    if isinstance(filter_freq,np.ndarray) or isinstance(filter_freq,list):
+                        gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype,passes=filter_passes) 
+                    else:
+                        assert isinstance(filter_freq,dict), 'Incorrect format for filter_freq'
+                        if chan_id in filter_freq:
+                            freqs = filter_freq[chan_id]
+                        else:
+                            freqs = filter_freq['default']
+                        gf_sac.filter(freq=freqs,order=filter_order,btype=filter_btype,passes=filter_passes)
+                    # Right taper the end of the GFs to avoid padding artifacts
+                    taper_len = int(0.1*gf_sac.npts)
+                    ang = np.pi / taper_len
+                    gf_sac.depvar[-taper_len:] *= (1.0 + np.cos(np.arange(taper_len)*ang))/2.
                  
                 # Padding to npts padding
                 if npts_padding is not None and gf_sac.depvar.size < npts_padding:
@@ -1676,21 +1725,34 @@ class cmtproblem(object):
                     depvar[gf_sac.depvar.size:] = depvar[gf_sac.depvar.size-1]
                     gf_sac.depvar = depvar
                     gf_sac.npts = npts_padding
+                    if tilt_corr: 
+                        depvar = np.zeros((npts_padding),) 
+                        depvar[:gft_sac.depvar.size] = gft_sac.depvar
+                        gft_sac.depvar = depvar
+                        gft_sac.npts = npts_padding
                     
                 # Convolve with STF(s)
                 if stf is not None:
                     if triangular_stf and m in self.cmt.MTnm: # Convolve with a triangular stf
                         gf_sac = conv_by_tri_stf(gf_sac,0.,self.cmt.hd)
-
+                        if tilt_corr: # Tilt corrections
+                            gft_sac = conv_by_tri_stf(gft_sac,0.,self.cmt.hd)
+            
                     elif sinusoidal_stf and m in self.force.Fnm:
                         gf_sac = conv_by_sin_stf(gf_sac,0.,self.force.hd)
+                        if tilt_corr:
+                            gft_sac = conv_by_sin_stf(gft_sac,0.,self.force.hd)
                             
                     elif isinstance(stf,np.ndarray) or isinstance(stf,list): 
                         gf_sac.depvar=np.convolve(gf_sac.depvar,stf,mode='full')[:gf_sac.npts]
+                        if tilt_corr:
+                            gft_sac.depvar=np.convolve(gft_sac.depvar,stf,mode='full')[:gft_sac.npts]
                         
                     else:
                         assert chan_id in stf, 'No channel id %s in stf'%(chan_id)
                         gf_sac.depvar=np.convolve(gf_sac.depvar,stf[chan_id],mode='full')[:gf_sac.npts]
+                        if tilt_corr:
+                            gft_sac.depvar=np.convolve(gft_sac.depvar,stf[chan_id],mode='full')[:gft_sac.npts]
 
                 # Time-shift
                 if isinstance(delay,dict):
@@ -1706,8 +1768,8 @@ class cmtproblem(object):
                     else:
                         gf_sac.b += delay[1]
 
-                # Filter
-                if filter_freq is not None:
+                # Filter if no filter was applied before padding
+                if npts_padding is None and filter_freq is not None:
                     if isinstance(filter_freq,np.ndarray) or isinstance(filter_freq,list):
                         gf_sac.filter(freq=filter_freq,order=filter_order,btype=filter_btype,passes=filter_passes) 
                     else:
@@ -1717,9 +1779,23 @@ class cmtproblem(object):
                         else:
                             freqs = filter_freq['default']
                         gf_sac.filter(freq=freqs,order=filter_order,btype=filter_btype,passes=filter_passes)
+                        # Warning: here gft_sac tilt corrections should be pre-filtered (no filtering is done here)
 
                 if derivate:
                     gf_sac.derivate()            
+
+                if tilt_corr:
+                    if derivate:
+                        gft_sac.derivate()
+                    #import matplotlib.pyplot as plt
+                    #plt.figure(figsize=(20,12))
+                    #plt.plot(gf_sac.depvar,'k-',label='GF %s'%(chan_id))
+                    #plt.plot(gft_sac.depvar,'r-',label='Tilt-correction')
+                    gf_sac.depvar += gft_sac.depvar # Patch to correct for incorrect denominator in partial derivatives
+                    #plt.plot(gf_sac.depvar,'b-',label='GF + Tilt-correction')
+                    #plt.legend()
+                    #plt.title('Green\'s function %s'%(chan_id))
+                    #plt.show()
 
                 # Time-window matching data
                 if self.data is not None and windowing:
@@ -1783,7 +1859,7 @@ class cmtproblem(object):
         # All done
         return
     
-    def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',filter_passes=1,
+    def ts_hd_gridsearch(self,ts_search,hd_search,stf=None,GF_names=None,GFt_names=None,filter_freq=None,filter_order=4,filter_btype='bandpass',filter_passes=1,
                         derivate=False,scale=1.,zero_trace=True,vertical_force=False,MT=None,pre_weight=False,read_from_file=True,npts_padding=None,ncpu=None):
         '''
         Performs a grid-search to get optimum centroid time-shifts and half-duration
@@ -1792,6 +1868,7 @@ class cmtproblem(object):
             * hd_search: half-duration values to be explored (list or ndarray)
             * stf: moment rate function (optionnal, default=None, can be a single STF in a 1D array or multiple STFs to be explored in a 2D array)
             * GF_names : dictionary of GFs names (see preparekernels)
+            * GFt_names : dictionary of GFs tilt correction names (see preparekernels)
             * filter_freq (optional): filter corner frequencies (see sacpy.filter)
             * filter_order (optional): default is 4 (see sacpy.filter)
             * filter_btype (optional): default is 'bandpass' (see sacpy.filter) 
@@ -1835,11 +1912,11 @@ class cmtproblem(object):
             singleSTF = True
             # Prepare the kernels
             if stf is not None and len(stf.shape)==1:
-                self.preparekernels(GF_names,delay=0.,stf=stf ,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
+                self.preparekernels(GF_names,GFt_names=GFt_names,delay=0.,stf=stf ,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
                                     filter_passes=filter_passes,derivate=derivate,scale=scale,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
             else:
                 assert len(hd_search)==1, "Incorrect size of hd_search"
-                self.preparekernels(GF_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
+                self.preparekernels(GF_names,GFt_names=GFt_names,delay=0.,stf=hd_search[0],filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
                                     filter_passes=filter_passes,derivate=derivate,scale=scale,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
                 
             # Todo list
@@ -1848,7 +1925,7 @@ class cmtproblem(object):
         
         else: # Parallelism is done with respect to hd_search (we filter only and do the STF convolutions in parallel)
             # Prepare the kernels
-            self.preparekernels(GF_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
+            self.preparekernels(GF_names,GFt_names=GFt_names,delay=0.,stf=None,filter_freq=filter_freq,filter_order=filter_order,filter_btype=filter_btype,
                                 filter_passes=filter_passes,derivate=derivate,scale=scale,read_from_file=read_from_file,npts_padding=npts_padding,windowing=False)
             # Todo list
             if stf is not None:
